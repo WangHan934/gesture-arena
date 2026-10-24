@@ -2,6 +2,9 @@
 
 用鼠标或手指在画板上画一个符号，召唤对应生物，攻破敌方核心。
 
+> **新加入的成员**：先看 [ONBOARDING.md](ONBOARDING.md)，按 6 步走完就能开工。
+> 已经配好环境的老手，直接看下面的快速开始。
+
 纯前端项目：**HTML + CSS + 原生 JavaScript**，没有构建步骤、没有依赖、不需要 npm install。
 克隆下来跑一条命令就能玩。
 
@@ -65,6 +68,9 @@ gesture-arena/
 ├── index.html              游戏入口（页面骨架 + HUD 元素）
 ├── start.bat               Windows 一键启动
 ├── start.sh                macOS / Linux 一键启动
+├── ONBOARDING.md           新成员接入指南（新人先看这个）
+├── README.md               项目介绍与运行说明
+├── CONTRIBUTING.md         协作流程与代码规范
 ├── src/
 │   ├── main.js             主入口：接线 + 主循环（唯一需要改这里的人）
 │   ├── config.js           全局配置：所有可调数值
