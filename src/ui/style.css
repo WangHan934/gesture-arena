@@ -212,6 +212,7 @@ body {
 .pad {
   position: relative;
   flex: none;
+  margin-left: auto;
   width: clamp(96px, 11vw, 138px);
   aspect-ratio: 1;
   border-radius: 14px;
