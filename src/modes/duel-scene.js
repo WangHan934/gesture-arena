@@ -51,6 +51,7 @@ export function drawDuelScene(ctx, world, t, stars = []) {
   }
 
   drawCenterMark(ctx, t);
+  drawRangeLine(ctx, world);
 
   // 后画的在前面，保证冲刺时压住对手
   const playerFirst = !(world.lunge.player > 0);
@@ -62,6 +63,43 @@ export function drawDuelScene(ctx, world, t, stars = []) {
 
   drawEffects(ctx, world.effects ?? []);
   drawVignette(ctx);
+}
+
+/**
+ * 两个单位之间的射程连线。
+ * 贴身到能普攻时是绿色，拉开打不到时是灰色 —— 玩家一眼就能看出该靠近还是该撤。
+ */
+function drawRangeLine(ctx, world) {
+  const p = world.player;
+  const e = world.enemy;
+  if (!p || !e) return;
+
+  const y = DUEL.fighterY - DUEL.baseSize * 0.34;
+  const inRange = world.inPlayerRange;
+
+  ctx.save();
+  ctx.setLineDash([6, 8]);
+  ctx.lineWidth = inRange ? 2 : 1.5;
+  ctx.strokeStyle = inRange ? 'rgba(110, 231, 150, 0.45)' : 'rgba(140, 165, 205, 0.16)';
+
+  ctx.beginPath();
+  ctx.moveTo(p.x + 34, y);
+  ctx.lineTo(e.x - 34, y);
+  ctx.stroke();
+  ctx.restore();
+
+  // 打不到的时候在中间给一句提示，避免玩家不知道为啥普攻没反应
+  if (!inRange) {
+    const mx = (p.x + e.x) / 2;
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.font = '12px "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#9db0cc';
+    ctx.fillText('超出普攻射程', mx, y - 12);
+    ctx.restore();
+  }
 }
 
 /* ---------------- 背景 ---------------- */
@@ -196,6 +234,19 @@ function drawFighter(ctx, unit, world, side, t) {
   ctx.fillStyle = 'rgba(0, 0, 0, 0.32)';
   ctx.fill();
 
+  // 玩家站进了重击危险区：脚下套一圈红色虚线，提示「该往后撤了」。
+  // 这是玩家判断站位的唯一依据 —— 没有它就只能靠记数字。
+  if (side === 'player' && world.heavyWillHit) {
+    ctx.save();
+    ctx.setLineDash([5, 6]);
+    ctx.beginPath();
+    ctx.ellipse(unit.x, feetY + 6, unit.size * 0.54, unit.size * 0.15, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 118, 88, 0.55)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // 阵营光晕
   const haloR = unit.size * 1.15;
   const halo = ctx.createRadialGradient(cx, cy, 2, cx, cy, haloR);
@@ -211,15 +262,25 @@ function drawFighter(ctx, unit, world, side, t) {
     drawSkillRing(ctx, cx, cy, unit, world.skillReady, t);
   }
 
-  // 敌人出手前的预警
+  // 敌人出手前的预警。
+  // 如果这一下是重击、而玩家已经拉开到射程外，预警圈变蓝 —— 告诉玩家「这一下会落空」。
   if (side === 'enemy' && world.enemyNextAttackIn !== null && world.enemyNextAttackIn < 0.55) {
     const warn = 1 - world.enemyNextAttackIn / 0.55;
+    const dodgeable = world.enemyHeavyNext && world.heavyWillHit === false;
+
     ctx.beginPath();
     ctx.ellipse(unit.x, feetY + 4, unit.size * (0.5 + warn * 0.35), unit.size * (0.16 + warn * 0.1), 0, 0, Math.PI * 2);
-    ctx.strokeStyle = world.enemyHeavyNext
-      ? `rgba(255, 120, 90, ${0.25 + warn * 0.5})`
-      : `rgba(255, 90, 90, ${0.15 + warn * 0.35})`;
-    ctx.lineWidth = world.enemyHeavyNext ? 3 : 2;
+
+    if (dodgeable) {
+      ctx.strokeStyle = `rgba(120, 190, 255, ${0.2 + warn * 0.35})`;
+      ctx.lineWidth = 2;
+    } else if (world.enemyHeavyNext) {
+      ctx.strokeStyle = `rgba(255, 120, 90, ${0.25 + warn * 0.5})`;
+      ctx.lineWidth = 3;
+    } else {
+      ctx.strokeStyle = `rgba(255, 90, 90, ${0.15 + warn * 0.35})`;
+      ctx.lineWidth = 2;
+    }
     ctx.stroke();
   }
 
@@ -242,11 +303,11 @@ function drawFighter(ctx, unit, world, side, t) {
     ctx.fill();
   }
 
-  drawNameplate(ctx, unit, cx, feetY + 20);
+  drawNameplate(ctx, unit, cx, feetY + 32);
 }
 
 function drawSkillRing(ctx, cx, cy, unit, ready, t) {
-  const r = unit.size * 0.72;
+  const r = unit.size * 0.62;
   const start = -Math.PI / 2;
 
   ctx.save();
@@ -304,6 +365,7 @@ function drawEffects(ctx, effects) {
     const a = Math.max(0, fx.life / fx.maxLife);
     // 刚出现时先放大一下，再稳定
     const pop = fx.life > fx.maxLife * 0.78 ? 1.35 : 1;
+    const text = fx.text ?? `-${fx.value}`;
 
     ctx.globalAlpha = a;
     ctx.font = `bold ${Math.round((fx.big ? 34 : 24) * pop)}px "Segoe UI", system-ui, sans-serif`;
@@ -311,10 +373,10 @@ function drawEffects(ctx, effects) {
     // 描边保证在任何背景上都读得清
     ctx.lineWidth = 4;
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.65)';
-    ctx.strokeText(`-${fx.value}`, fx.x, fx.y);
+    ctx.strokeText(text, fx.x, fx.y);
 
     ctx.fillStyle = fx.color;
-    ctx.fillText(`-${fx.value}`, fx.x, fx.y);
+    ctx.fillText(text, fx.x, fx.y);
   }
 
   ctx.restore();

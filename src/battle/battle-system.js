@@ -105,6 +105,20 @@ export const RULES = {
   maxDelta: 0.1,
   /** 事件日志保留条数 */
   logLimit: 20,
+
+  /* ---------------- 距离 / 射程（可选玩法） ----------------
+   * 距离 distance ∈ [0, 1]：0 = 贴身，1 = 最远。
+   * 默认全部射程 = 1，也就是「任何距离都能打到」—— 不传距离时行为与原来完全一致，
+   * 现有单测不受影响。决斗模式会覆盖成下面的值来玩走位。
+   */
+  /** 玩家普攻的最大命中距离 */
+  playerReach: 1,
+  /** 玩家技能的最大命中距离（技能是远程手段，所以默认比普攻宽） */
+  playerSkillReach: 1,
+  /** 敌人普通攻击的最大命中距离 */
+  enemyReach: 1,
+  /** 敌人重击的最大命中距离。调小 = 拉开距离可以躲掉重击 */
+  enemyHeavyReach: 1,
 };
 
 /* ================================================================
@@ -214,6 +228,7 @@ export class BattleSystem {
     this._skillCooldown = 0;
     this._enemyTimer = 0;
     this._enemyAttackCount = 0;
+    this._distance = 0;   // 0 = 贴身，1 = 最远
     this._log = [];
     this._lastEvent = null;
     this._stats = this._emptyStats();
@@ -244,6 +259,40 @@ export class BattleSystem {
   get isPlaying() { return this._phase === 'playing'; }
   get isOver() { return this._phase === 'win' || this._phase === 'lose'; }
 
+  /** 当前距离 0~1（0 = 贴身） */
+  get distance() { return this._distance; }
+
+  /**
+   * 走位：调整距离。
+   * @param {number} delta 正数 = 拉开，负数 = 靠近
+   * @returns {{ok:boolean, distance:number, reason?:string}}
+   */
+  moveBy(delta) {
+    if (this._phase !== 'playing') {
+      return { ok: false, reason: this._phase === 'idle' ? 'not-started' : 'battle-over', distance: this._distance };
+    }
+    if (!Number.isFinite(delta) || delta === 0) {
+      return { ok: false, reason: 'invalid-delta', distance: this._distance };
+    }
+
+    const before = this._distance;
+    this._distance = Math.min(1, Math.max(0, this._distance + delta));
+
+    return { ok: this._distance !== before, reason: this._distance === before ? 'edge' : undefined, distance: this._distance };
+  }
+
+  /** 直接设置距离（0~1），主要给测试和外部定位用 */
+  setDistance(value) {
+    const v = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+    this._distance = v;
+    return { ok: true, distance: v };
+  }
+
+  /** 当前距离下，玩家普攻够不够得着 */
+  canPlayerReach() {
+    return this._distance <= this.rules.playerReach;
+  }
+
   /** 可用怪物列表（给选择界面用，只读拷出） */
   listRoster() {
     return this._monsters.map((def) => toCombatant(def));
@@ -263,6 +312,10 @@ export class BattleSystem {
       over: this.isOver,
       time: Number(this._time.toFixed(3)),
       round: this._round,
+
+      // 走位状态：0 = 贴身，1 = 最远
+      distance: Number(this._distance.toFixed(3)),
+      inPlayerRange: this.canPlayerReach(),
 
       player: p ? {
         id: p.id, name: p.name, type: p.type, color: p.color, glyph: p.glyph,
@@ -324,6 +377,7 @@ export class BattleSystem {
     this._skillCooldown = this.rules.playerSkillInitialCooldown;
     this._enemyTimer = this.rules.enemyFirstAttackDelay;
     this._enemyAttackCount = 0;
+    this._distance = 0;
     this._log = [];
     this._stats = this._emptyStats();
 
@@ -351,6 +405,16 @@ export class BattleSystem {
         ok: false,
         reason: 'cooldown',
         remaining: Number(this._playerCooldown.toFixed(3)),
+        state: this.getBattleState(),
+      };
+    }
+
+    // 走位：太远就打不到（射程默认 1，也就是永远够得着）
+    if (this._distance > this.rules.playerReach) {
+      return {
+        ok: false,
+        reason: 'out-of-range',
+        distance: Number(this._distance.toFixed(3)),
         state: this.getBattleState(),
       };
     }
@@ -396,6 +460,16 @@ export class BattleSystem {
         ok: false,
         reason: 'cooldown',
         remaining: Number(this._skillCooldown.toFixed(3)),
+        state: this.getBattleState(),
+      };
+    }
+
+    // 技能是远程手段，射程比普攻宽
+    if (this._distance > this.rules.playerSkillReach) {
+      return {
+        ok: false,
+        reason: 'out-of-range',
+        distance: Number(this._distance.toFixed(3)),
         state: this.getBattleState(),
       };
     }
@@ -477,6 +551,7 @@ export class BattleSystem {
     this._skillCooldown = 0;
     this._enemyTimer = 0;
     this._enemyAttackCount = 0;
+    this._distance = 0;
     this._log = [];
     this._stats = this._emptyStats();
     this._lastEvent = null;
@@ -535,6 +610,22 @@ export class BattleSystem {
 
     const heavy = this._enemyAttackCount % this.rules.enemyHeavyEvery === 0;
     const multiplier = heavy ? this.rules.enemyHeavyMultiplier : 1;
+
+    // 走位：拉开到重击射程之外就能躲掉重击（普攻射程默认更宽，躲不掉）
+    const reach = heavy ? this.rules.enemyHeavyReach : this.rules.enemyReach;
+    if (this._distance > reach) {
+      const miss = {
+        type: 'enemy-miss',
+        heavy,
+        distance: Number(this._distance.toFixed(3)),
+        playerHp: this._player.hp,
+        playerMaxHp: this._player.maxHp,
+        killed: false,
+      };
+      this._emit(miss);
+      return miss;
+    }
+
     const damage = computeDamage(this._enemy.attack * multiplier, this._player.defense, this.rules);
 
     this._player.hp = Math.max(0, this._player.hp - damage);

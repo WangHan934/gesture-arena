@@ -6,7 +6,7 @@
   "description": "手势竞技场 —— 画手势召唤生物 / 出招对战的网页游戏",
   "scripts": {
     "start": "python -m http.server 8000",
-    "test": "node src/battle/battle-system.test.mjs && node tests/hand.test.mjs",
+    "test": "node src/battle/battle-system.test.mjs && node tests/gesture.test.mjs && node tests/duel-range.test.mjs && node tests/hand.test.mjs",
     "balance": "node src/modes/duel-balance.mjs"
   }
 }

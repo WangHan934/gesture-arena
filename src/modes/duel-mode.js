@@ -5,22 +5,33 @@
  *
  * 【和塔防的关键差别】
  *   塔防：手势 = 召唤生物，胜负看谁的塔先倒。
- *   决斗：手势 = 出招，胜负看谁的血先空。
+ *   决斗：手势 = 走位 + 出招，胜负看谁的血先空。
  *
  * 【手势怎么映射】
- *   决斗引擎只有两个动作（普攻 / 技能），所以 4 个手势按「线条类 / 图形类」二分：
- *     横线、折线  → 普攻（笔画快，对应快攻）
- *     V 形、圆    → 技能（图形完整，对应蓄力重击）
- *   这个映射写死在 ACTION_BY_GESTURE 里，想改只改这一处。
+ *   横线       → 走位（**笔画方向决定往哪走**：从左往右 = 靠近，从右往左 = 拉开）
+ *   折线 Z     → 普攻
+ *   V 形       → 技能
+ *   圆         → 不用（决斗里没有对应动作，画了会提示用不上）
+ *
+ *   横线用方向而不是新增「左右箭头」图形，是因为：
+ *     1. 不用学新手势，滑动本身就是最直觉的移动动作
+ *     2. 识别器做过旋转对齐，正着画和反着画都会匹配到 line_h，
+ *        方向信息要从原始点上取（见 gesture-recognizer.js）
+ *
+ * 【走位的意义】
+ *   引擎里有 distance（0 贴身 / 1 最远），射程见 config.js 的 DUEL_RULES：
+ *     贴身  → 能普攻，但会吃到重击
+ *     拉开  → 躲得掉重击，但普攻打不到，只能等技能
+ *   所以决斗的节奏是「贴上去打几下 → 看到重击预警就撤 → 再贴回去」。
  *
  * 【动画状态放这里，不放渲染器】
- *   冲刺、受击闪白、伤害跳字都是「由战斗事件驱动的时间轴」，
+ *   冲刺、受击闪白、伤害跳字、平滑走位都是「由操作驱动的时间轴」，
  *   属于模式层的表现状态。渲染器只负责按当前值画，保持无状态。
  */
 
 import { createBattleSystem } from '../battle/battle-system.js';
 import { CREATURES } from '../summon/creature-data.js';
-import { DUEL, DUEL_RULES, DUEL_STATS, GESTURE_GLYPH } from '../config.js';
+import { DUEL, DUEL_RULES, DUEL_STATS } from '../config.js';
 
 /**
  * 决斗用的生物表：在 B 的原始数据上叠加决斗专用修正。
@@ -34,12 +45,10 @@ function buildDuelRoster() {
   }));
 }
 
-/** 手势 → 动作。想改映射只改这里。 */
+/** 手势 → 动作。line_h 因为要看方向，在 handleGesture 里单独处理。 */
 const ACTION_BY_GESTURE = {
-  line_h: 'attack',
   zigzag: 'attack',
   v_shape: 'skill',
-  circle: 'skill',
 };
 
 /** 动作 → 中文名，给提示气泡用 */
@@ -56,15 +65,13 @@ export class DuelMode {
 
     /**
      * 摄像头姿态 → 动作。
-     * 决斗刚好是「选怪 + 两个战斗动作」，和模块的 5 个姿态几乎天生一对：
-     *   1/2/3 根手指 → 选第 1/2/3 只生物
-     *   握拳         → 普攻
-     *   张掌         → 技能
+     * 模块只输出 5 种姿态，没有「左 / 右」方向，所以走位只能靠画板画横线。
+     * 战斗中 1/2 指是空闲的（选怪已经结束），正好拿来当走位用。
      */
     this.cameraMap = {
-      one: 'monster:0',
-      two: 'monster:1',
-      three: 'monster:2',
+      one: 'monster:0',      // 选怪阶段：第 1 只；战斗中：靠近
+      two: 'monster:1',      // 选怪阶段：第 2 只；战斗中：拉开
+      three: 'monster:2',    // 选怪阶段：第 3 只
       fist: 'attack',
       open_palm: 'skill',
     };
@@ -92,6 +99,8 @@ export class DuelMode {
     this._lunge = { player: 0, enemy: 0 };
     this._hit = { player: 0, enemy: 0 };
     this._effects = [];
+    // 走位的显示值：平滑追向 system.distance，避免一次瞬移
+    this._visualDistance = 0;
   }
 
   /* ---------------- 生命周期 ---------------- */
@@ -133,8 +142,8 @@ export class DuelMode {
   }
 
   /**
-   * 处理手势：翻译成出招指令
-   * @param {{id:string, score:number} | null} result
+   * 处理手势：翻译成走位或出招指令
+   * @param {{id:string, score:number, dir?:'ltr'|'rtl'} | null} result
    * @returns {{ok:boolean, message:string}}
    */
   handleGesture(result) {
@@ -146,6 +155,11 @@ export class DuelMode {
     }
     if (!result) {
       return { ok: false, message: '没认出来，再画一次' };
+    }
+
+    // 横线 = 走位，方向由笔画决定（从左往右 = 靠近，从右往左 = 拉开）
+    if (result.id === 'line_h') {
+      return this._move(result.dir === 'rtl' ? 'away' : 'toward');
     }
 
     const action = ACTION_BY_GESTURE[result.id];
@@ -160,6 +174,9 @@ export class DuelMode {
         const wait = (res.remaining ?? 0).toFixed(1);
         return { ok: false, message: `${ACTION_LABEL[action]}冷却中（${wait}s）` };
       }
+      if (res.reason === 'out-of-range') {
+        return { ok: false, message: '太远了，画横线靠近' };
+      }
       if (res.reason === 'battle-over') {
         return { ok: false, message: '本局已结束' };
       }
@@ -167,6 +184,30 @@ export class DuelMode {
     }
 
     return { ok: true, message: `${ACTION_LABEL[action]} ${res.damage}` };
+  }
+
+  /**
+   * 走位
+   * @param {'toward'|'away'} direction toward = 靠近敌人，away = 拉开
+   * @returns {{ok:boolean, message:string, moved?:boolean}}
+   */
+  _move(direction) {
+    const step = this.system.rules.moveStep;
+    const res = this.system.moveBy(direction === 'toward' ? -step : step);
+
+    if (!res.ok) {
+      if (res.reason === 'edge') {
+        return { ok: false, message: direction === 'toward' ? '已经贴身了' : '已经退到最远' };
+      }
+      return { ok: false, message: '现在动不了' };
+    }
+
+    const percent = Math.round((1 - res.distance) * 100);
+    return {
+      ok: true,
+      moved: true,
+      message: direction === 'toward' ? `靠近（贴身度 ${percent}%）` : `拉开（贴身度 ${percent}%）`,
+    };
   }
 
   /**
@@ -179,28 +220,38 @@ export class DuelMode {
       return { ok: false, message: '这个手势在决斗模式用不上' };
     }
 
-    // 选怪阶段：手指数量选生物
     if (action.startsWith('monster:')) {
-      if (this._phase !== 'select') {
-        return { ok: false, message: '对局已经开始，先打完这局' };
+      const index = Number(action.slice('monster:'.length));
+
+      // 选怪阶段：手指数量 = 选第几只
+      if (this._phase === 'select') {
+        const unit = this.roster[index];
+        if (!unit) return { ok: false, message: '没有这只生物' };
+
+        const res = this.selectMonster(unit.id);
+        if (!res.ok) return { ok: false, message: res.message ?? '选不了这只生物' };
+
+        return { ok: true, message: `选定 ${unit.name}，开打`, started: true };
       }
 
-      const index = Number(action.slice('monster:'.length));
-      const unit = this.roster[index];
-      if (!unit) return { ok: false, message: '没有这只生物' };
+      // 战斗中：1 指 = 靠近，2 指 = 拉开。
+      // 模块没有「左右」方向的姿态，所以用选怪阶段剩下的手指姿势兼职走位。
+      if (this._phase === 'playing') {
+        if (index === 0) return this._move('toward');
+        if (index === 1) return this._move('away');
+        return { ok: false, message: '这个手势在战斗中没用' };
+      }
 
-      const res = this.selectMonster(unit.id);
-      if (!res.ok) return { ok: false, message: res.message ?? '选不了这只生物' };
-
-      return { ok: true, message: `选定 ${unit.name}，开打`, started: true };
+      return { ok: false, message: '本局已结束' };
     }
 
-    // 战斗中：复用 handleGesture，冷却和提示逻辑只写一份
+    // 战斗中：复用 handleGesture，冷却和射程逻辑只写一份
     if (action === 'attack' || action === 'skill') {
       if (this._phase === 'select') {
         return { ok: false, message: '先比出手指选一只生物' };
       }
-      return this.handleGesture({ id: action === 'attack' ? 'line_h' : 'v_shape', score: 0 });
+      // 注意：普攻对应的是折线，横线现在是走位
+      return this.handleGesture({ id: action === 'attack' ? 'zigzag' : 'v_shape', score: 0 });
     }
 
     return { ok: false, message: '这个手势在决斗模式用不上' };
@@ -219,6 +270,8 @@ export class DuelMode {
       }));
     }
     return [
+      { glyph: '☝', label: '靠近' },
+      { glyph: '✌', label: '拉开' },
       { glyph: '✊', label: '普攻' },
       { glyph: '🖐', label: '技能' },
     ];
@@ -229,10 +282,10 @@ export class DuelMode {
   getLegend() {
     // 只列出真正有用的手势，避免玩家画了没反应
     return [
-      { glyph: GESTURE_GLYPH.line_h, label: '普攻', cost: null, color: '#9dc4ff' },
-      { glyph: GESTURE_GLYPH.zigzag, label: '普攻', cost: null, color: '#9dc4ff' },
-      { glyph: GESTURE_GLYPH.v_shape, label: '技能', cost: null, color: '#ffd93d' },
-      { glyph: GESTURE_GLYPH.circle, label: '技能', cost: null, color: '#ffd93d' },
+      { glyph: '→', label: '靠近', cost: null, color: '#7fb0ff' },
+      { glyph: '←', label: '拉开', cost: null, color: '#7fb0ff' },
+      { glyph: 'Z', label: '普攻', cost: null, color: '#ff8a3d' },
+      { glyph: 'V', label: '技能', cost: null, color: '#ffd93d' },
     ];
   }
 
@@ -241,7 +294,8 @@ export class DuelMode {
   getView() {
     const s = this.system.getBattleState();
 
-    const player = s.player ? this._fighter(s.player, DUEL.playerX, 'player') : null;
+    const playerX = this._playerX();
+    const player = s.player ? this._fighter(s.player, playerX, 'player') : null;
     const enemy = s.enemy ? this._fighter(s.enemy, DUEL.enemyX, 'enemy') : null;
 
     const skillRatio = player && !player.skillReady
@@ -293,6 +347,12 @@ export class DuelMode {
         enemyHeavyNext: Boolean(s.enemy?.heavyNext),
         skillReady: Boolean(player?.skillReady),
         round: s.round,
+
+        // 走位状态：给渲染器画「够不够得着」的提示
+        distance: s.distance,
+        inPlayerRange: s.inPlayerRange,
+        // 重击会不会打中（拉开就躲得掉）
+        heavyWillHit: s.distance <= this.system.rules.enemyHeavyReach,
       },
 
       stats: {
@@ -300,6 +360,16 @@ export class DuelMode {
         detail: `用时 ${s.time.toFixed(1)} 秒 · 出手 ${s.round} 次 · 造成 ${s.stats.damageDealt} 伤害`,
       },
     };
+  }
+
+  /**
+   * 玩家当前的屏幕 x。
+   * 用平滑过的 _visualDistance，所以走位是滑过去而不是瞬移。
+   */
+  _playerX() {
+    const near = DUEL.playerNearX;
+    const far = DUEL.playerFarX;
+    return far + (1 - this._visualDistance) * (near - far);
   }
 
   /** 把战斗单位整理成渲染器要的形状 */
@@ -326,6 +396,7 @@ export class DuelMode {
     this._hit.player = 0;
     this._hit.enemy = 0;
     this._effects = [];
+    this._visualDistance = 0;
   }
 
   _tickVisual(dt) {
@@ -333,6 +404,11 @@ export class DuelMode {
       this._lunge[side] = Math.max(0, this._lunge[side] - dt);
       this._hit[side] = Math.max(0, this._hit[side] - dt);
     }
+
+    // 走位显示值追向真实距离，做出「滑过去」的感觉
+    const target = this.system.distance;
+    const k = Math.min(1, dt * 14);
+    this._visualDistance += (target - this._visualDistance) * k;
 
     for (const fx of this._effects) {
       fx.life -= dt;
@@ -361,7 +437,13 @@ export class DuelMode {
       case 'enemy-attack':
         this._lunge.enemy = DUEL.lungeTime;
         this._hit.player = event.heavy ? 0.24 : 0.18;
-        this._pushDamage(event.damage, DUEL.playerX, event.heavy ? '#ff9b6b' : '#ff8a8a', event.heavy);
+        this._pushDamage(event.damage, this._playerX(), event.heavy ? '#ff9b6b' : '#ff8a8a', event.heavy);
+        break;
+
+      // 拉开躲掉了重击：飘一个「MISS」，让玩家知道自己躲成功了
+      case 'enemy-miss':
+        this._lunge.enemy = DUEL.lungeTime * 0.7;
+        this._pushText('MISS', this._playerX(), '#8fd6ff', true);
         break;
 
       default:
@@ -370,9 +452,13 @@ export class DuelMode {
   }
 
   _pushDamage(value, x, color, big) {
+    this._pushText(`-${value}`, x, color, big);
+  }
+
+  _pushText(text, x, color, big) {
     this._effects.push({
       kind: 'damage',
-      value,
+      text,
       x: x + (Math.random() - 0.5) * 40,
       y: DUEL.fighterY - DUEL.baseSize * 0.9,
       life: 0.85,

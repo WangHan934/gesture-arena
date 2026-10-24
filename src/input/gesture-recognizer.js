@@ -277,7 +277,18 @@ export function recognize(points) {
   if (best.score > GESTURE.matchThreshold) return null;
   if (!best.valid) return null; // 撞上负样本，直接判无效
 
-  return { id: best.id, score: best.score };
+  const result = { id: best.id, score: best.score };
+
+  // 横线额外给出笔画方向，决斗模式用它区分「靠近 / 拉开」。
+  // 必须在**原始点**上算：normalize() 里有旋转对齐（rotateToZero），
+  // 方向信息在那之后就被抹平了 —— 这也是为什么正着画和反着画都能匹配上 line_h。
+  if (best.id === 'line_h') {
+    const first = points[0];
+    const last = points[points.length - 1];
+    result.dir = last.x >= first.x ? 'ltr' : 'rtl';
+  }
+
+  return result;
 }
 
 /** 给 UI 用的手势图例 */
