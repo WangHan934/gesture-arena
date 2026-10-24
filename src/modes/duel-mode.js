@@ -54,6 +54,21 @@ export class DuelMode {
     this.name = '1v1 决斗';
     this.tagline = '选一只生物，画手势出招，打空对面血量';
 
+    /**
+     * 摄像头姿态 → 动作。
+     * 决斗刚好是「选怪 + 两个战斗动作」，和模块的 5 个姿态几乎天生一对：
+     *   1/2/3 根手指 → 选第 1/2/3 只生物
+     *   握拳         → 普攻
+     *   张掌         → 技能
+     */
+    this.cameraMap = {
+      one: 'monster:0',
+      two: 'monster:1',
+      three: 'monster:2',
+      fist: 'attack',
+      open_palm: 'skill',
+    };
+
     // 决斗专用生物表。注意必须同时传 getMonster：
     // battle-system 在没有 getMonster 时会优先用上游的 getCreatureById，
     // 那样查到的还是原始数值，DUEL_STATS 会被静默忽略（踩过这个坑）。
@@ -152,6 +167,61 @@ export class DuelMode {
     }
 
     return { ok: true, message: `${ACTION_LABEL[action]} ${res.damage}` };
+  }
+
+  /**
+   * 处理一个摄像头动作（来自 cameraMap）
+   * @param {string} action 形如 'monster:0' / 'attack' / 'skill'
+   * @returns {{ok:boolean, message:string, started?:boolean}}
+   */
+  handleCameraAction(action) {
+    if (typeof action !== 'string') {
+      return { ok: false, message: '这个手势在决斗模式用不上' };
+    }
+
+    // 选怪阶段：手指数量选生物
+    if (action.startsWith('monster:')) {
+      if (this._phase !== 'select') {
+        return { ok: false, message: '对局已经开始，先打完这局' };
+      }
+
+      const index = Number(action.slice('monster:'.length));
+      const unit = this.roster[index];
+      if (!unit) return { ok: false, message: '没有这只生物' };
+
+      const res = this.selectMonster(unit.id);
+      if (!res.ok) return { ok: false, message: res.message ?? '选不了这只生物' };
+
+      return { ok: true, message: `选定 ${unit.name}，开打`, started: true };
+    }
+
+    // 战斗中：复用 handleGesture，冷却和提示逻辑只写一份
+    if (action === 'attack' || action === 'skill') {
+      if (this._phase === 'select') {
+        return { ok: false, message: '先比出手指选一只生物' };
+      }
+      return this.handleGesture({ id: action === 'attack' ? 'line_h' : 'v_shape', score: 0 });
+    }
+
+    return { ok: false, message: '这个手势在决斗模式用不上' };
+  }
+
+  /**
+   * 摄像头开启时控制条上显示的对照表。
+   * 选怪阶段只列前 3 只 —— 模块只输出 1/2/3 根手指，第 4 只只能鼠标点，
+   * 列出来会让玩家比划半天没反应。
+   */
+  getCameraHint() {
+    if (this._phase === 'select') {
+      return this.roster.slice(0, 3).map((unit, i) => ({
+        glyph: ['☝', '✌', '🤟'][i],
+        label: unit.name,
+      }));
+    }
+    return [
+      { glyph: '✊', label: '普攻' },
+      { glyph: '🖐', label: '技能' },
+    ];
   }
 
   /* ---------------- 图例 / 资源条 ---------------- */

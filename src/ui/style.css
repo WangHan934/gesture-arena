@@ -13,6 +13,19 @@
   --purple: #a06bff;
   --green: #4ade80;
   --line: rgba(120, 160, 255, 0.22);
+
+  /*
+   * 摄像头开启时，给左下角的画中画面板在左侧留出的宽度。
+   * 面板是队友 B 的模块自带的，固定在 left:18px / bottom:18px、宽 244px，
+   * 而塔防画面左右两侧都是塔 —— 面板叠在画面上必然挡住东西。
+   * 做法：开启摄像头时给 body 加左侧内边距，整个游戏右移，
+   * 面板就落在左侧空白里。不能用「收窄 .app」—— 那是左右对称收，白让一半。
+   */
+  --camera-reserve: 0px;
+}
+
+body.camera-on {
+  --camera-reserve: 280px;
 }
 
 * {
@@ -27,6 +40,7 @@ body {
 body {
   margin: 0;
   padding: 24px;
+  padding-left: calc(24px + var(--camera-reserve));
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -36,6 +50,7 @@ body {
   font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
   overflow: auto;
+  transition: padding-left 0.25s ease;
 }
 
 .app {
@@ -93,6 +108,66 @@ body {
   color: #cfe0ff;
   border-color: rgba(120, 160, 255, 0.5);
   background: rgba(20, 32, 60, 0.85);
+}
+
+.mode-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 摄像头开启中 */
+.mode-chip.on {
+  color: #b9f5cf;
+  border-color: rgba(74, 222, 128, 0.55);
+  background: rgba(20, 60, 40, 0.75);
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.08);
+}
+
+.topbar-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 摄像头开启后的手势对照表 */
+.camera-hint {
+  display: none;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(74, 222, 128, 0.22);
+}
+
+.camera-hint.show {
+  display: flex;
+}
+
+.camera-hint-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(20, 50, 38, 0.55);
+  border: 1px solid rgba(74, 222, 128, 0.18);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  color: #a9d9bd;
+}
+
+.camera-hint-item b {
+  font-size: 12px;
+  font-weight: 400;
+  color: #d8f5e4;
+}
+
+/* 窄屏收窄游戏会让画面太小，这里取消让位，面板允许叠在画面上（它有收起按钮） */
+@media (max-width: 1100px) {
+  body.camera-on {
+    --camera-reserve: 0px;
+  }
 }
 
 /* ---------------- 战场容器 ---------------- */

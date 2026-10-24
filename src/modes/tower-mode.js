@@ -25,6 +25,18 @@ export class TowerMode {
     this.name = '塔防制';
     this.tagline = '画手势召唤生物，推进拆掉敌方核心';
 
+    /**
+     * 摄像头姿态 → 动作。塔防只有一个动作：召唤，所以 4 个姿态对应 4 只生物。
+     * 模块只输出 1/2/3 根手指，第 4 只（巨魔）用握拳 —— 力量型生物配握拳也说得通。
+     * open_palm 在塔防里没有对应动作，故意不给映射。
+     */
+    this.cameraMap = {
+      one: 'creature:0',
+      two: 'creature:1',
+      three: 'creature:2',
+      fist: 'creature:3',
+    };
+
     this.battle = new Battle();
     this.summoner = new Summoner(this.battle);
   }
@@ -48,6 +60,33 @@ export class TowerMode {
   handleGesture(result) {
     const out = this.summoner.cast(result);
     return { ok: out.ok, message: out.message };
+  }
+
+  /**
+   * 处理一个摄像头动作（来自 cameraMap）
+   * @param {string} action 形如 'creature:0'
+   * @returns {{ok:boolean, message:string}}
+   */
+  handleCameraAction(action) {
+    if (typeof action !== 'string' || !action.startsWith('creature:')) {
+      return { ok: false, message: '这个手势在塔防模式用不上' };
+    }
+
+    const index = Number(action.slice('creature:'.length));
+    const def = CREATURES[index];
+    if (!def) return { ok: false, message: '没有这只生物' };
+
+    // 复用召唤器的判定逻辑，法力不足等提示和画板完全一致
+    const out = this.summoner.cast({ id: def.gesture, score: 0 });
+    return { ok: out.ok, message: out.message };
+  }
+
+  /** 摄像头开启时控制条上显示的对照表 */
+  getCameraHint() {
+    return CREATURES.map((c, i) => ({
+      glyph: ['☝', '✌', '🤟', '✊'][i] ?? '?',
+      label: c.name,
+    }));
   }
 
   /** 控制条上的手势图例 */
