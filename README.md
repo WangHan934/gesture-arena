@@ -40,7 +40,11 @@ cd gesture-arena
 
 ## 玩法
 
-### 手势对照表
+开局先选玩法，两种模式随时可以在右上角「切换模式」换。
+
+### 塔防制
+
+画手势召唤生物，推进拆掉敌方核心。
 
 | 手势 | 生物 | 法力 | 生命 | 每秒伤害 | 速度 | 定位 |
 |---|---|---|---|---|---|---|
@@ -56,7 +60,19 @@ cd gesture-arena
 - 双方核心各 240 血，谁先掉光谁输。
 - 一局通常 30–60 秒。
 
-**画不准怎么办？** 画板会拒绝认不出的形状（画竖线、斜线、乱涂都不会误召唤），重新画一次即可。
+### 1v1 决斗
+
+选一只生物和对手单挑，先打空对方血量就赢。
+
+- **线条类手势（横线、折线）= 普攻**
+- **图形类手势（V 形、圆）= 技能**（1.8 倍伤害，冷却 4 秒）
+- 玩家每次出手都要重新画一遍，画得越快打得越快；敌人按固定节奏反击，出手前脚下会亮红圈预警。
+- 一局通常 3–8 秒，节奏很快。
+
+决斗用的是**单独一套数值**（`config.js` 里的 `DUEL_STATS`），因为玩家的出手被「画一次手势」卡住，
+塔防的数值直接搬进 1v1 会让高攻怪必胜。改之前先跑 `node src/modes/duel-balance.mjs` 看胜率表。
+
+**画不准怎么办？** 画板会拒绝认不出的形状（画竖线、斜线、乱涂都不会误触发），重新画一次即可。
 画得越接近标准形状，识别越稳。
 
 ---
@@ -65,35 +81,65 @@ cd gesture-arena
 
 ```
 gesture-arena/
-├── index.html              游戏入口（页面骨架 + HUD 元素）
+├── index.html              游戏入口（页面骨架 + HUD 元素 + 模式选择浮层）
+├── package.json            只用来跑测试和平衡脚本，无依赖、无构建
 ├── start.bat               Windows 一键启动
 ├── start.sh                macOS / Linux 一键启动
 ├── ONBOARDING.md           新成员接入指南（新人先看这个）
 ├── README.md               项目介绍与运行说明
 ├── CONTRIBUTING.md         协作流程与代码规范
 ├── src/
-│   ├── main.js             主入口：接线 + 主循环（唯一需要改这里的人）
+│   ├── main.js             主入口：选模式 + 接线 + 主循环
 │   ├── config.js           全局配置：所有可调数值
+│   ├── modes/              玩法层（E 整合）：把两套玩法包成同一个接口
+│   │   ├── index.js               模式注册表 + 开局模式判定
+│   │   ├── tower-mode.js          塔防适配器
+│   │   ├── duel-mode.js           决斗适配器
+│   │   ├── duel-scene.js          决斗画面绘制
+│   │   ├── duel-balance.mjs       决斗平衡自测
+│   │   └── README.md              模式接口说明（加新玩法看这个）
 │   ├── input/
 │   │   ├── gesture-canvas.js      手势画板：接收鼠标/触摸，记录轨迹
-│   │   └── gesture-recognizer.js  手势识别：$1 算法 + 模板
+│   │   ├── gesture-recognizer.js  手势识别：$1 算法 + 模板
+│   │   └── hand/                  摄像头手势识别（MediaPipe，未接入主流程）
 │   ├── summon/
 │   │   ├── creature-data.js       生物数据表（数值都在这里）
 │   │   └── summoner.js            召唤逻辑：手势 → 生物 → 校验法力
 │   ├── battle/
 │   │   ├── entity.js              实体：生物、塔
-│   │   └── battle.js              战斗规则：走位、伤害、波次、胜负
+│   │   ├── battle.js              塔防战斗规则：走位、伤害、波次、胜负
+│   │   └── battle-system.js       1v1 决斗规则：血量、技能、冷却、胜负
 │   └── ui/
-│       ├── renderer.js            Canvas 渲染：画战场
-│       ├── hud.js                 DOM 界面：血条、提示、结算
+│       ├── renderer.js            Canvas 渲染：画塔防战场
+│       ├── hud.js                 DOM 界面：血条、资源条、提示、结算
 │       └── style.css              样式
+├── vendor/hand/             MediaPipe 运行时与模型（26MB，仅摄像头模式用）
 └── assets/
     ├── images/             图片资源
     └── audio/              音效资源
 ```
 
-**分层原则**：`battle/` 是纯逻辑，不碰 DOM 和 canvas；`ui/` 只读数据、不改数据。
-所以换美术风格不会影响玩法，调玩法也不会影响画面。
+**分层原则**：`battle/` 是纯逻辑，不碰 DOM 和 canvas；`ui/` 只读数据、不改数据；
+`modes/` 负责把玩法翻译成 `ui/` 认识的统一结构。
+所以换美术风格不会影响玩法，调玩法也不会影响画面，加玩法也不用改 `ui/`。
+
+---
+
+## 常用命令
+
+```bash
+npm test        # 跑战斗系统（60 项）+ 摄像头手势（35 项）
+npm run balance # 跑决斗模式胜率表
+npm start       # 起本地服务器（需要 python）
+```
+
+没有 `npm` 也能直接跑：
+
+```bash
+node src/battle/battle-system.test.mjs
+node tests/hand.test.mjs
+node src/modes/duel-balance.mjs
+```
 
 ---
 
@@ -147,7 +193,7 @@ makeTemplate('my_shape', myShape()),
 | B 生物 | `src/summon/` | `creature-data.js`、`summoner.js` |
 | C 战斗 | `src/battle/` | `battle.js`、`entity.js` |
 | D 界面 | `src/ui/` | `renderer.js`、`hud.js`、`style.css` |
-| E 整合 | 根目录 | `main.js`、`config.js`、`index.html`、文档 |
+| E 整合 | 根目录 + `src/modes/` | `main.js`、`config.js`、`index.html`、`modes/`、文档 |
 
 `main.js` 和 `index.html` 只有 E 能改，其他人需要新接口就找 E 加。
 这样 5 个人同时开工也不会互相覆盖。
@@ -203,6 +249,7 @@ git push -u origin feature/你的任务
 | 手势识别 | $1 Unistroke Recognizer 简化版：重采样 64 点 → 等比缩放 → 居中 → 逐点比对 |
 | 识别准确率 | 模拟真人手绘 800 次，四类手势识别率 100%；乱画误判率约 11% |
 | 循环 | `requestAnimationFrame`，单帧步长上限 0.05 秒（切标签页回来不会瞬移） |
+| 玩法切换 | `src/modes/` 适配器层，两套战斗引擎并存互不影响 |
 | 兼容性 | 支持 Pointer Events 的现代浏览器（Chrome / Edge / Safari / Firefox 均可） |
 
 **识别器两个关键设计**
@@ -218,17 +265,20 @@ git push -u origin feature/你的任务
 
 - [x] 手势绘制 + 四类手势识别
 - [x] 召唤系统 + 法力经济
-- [x] 实时战斗：走位、交战、拆塔、胜负
+- [x] 塔防模式：走位、交战、拆塔、胜负
 - [x] 敌方波次随时间增强
+- [x] 1v1 决斗模式：选怪、普攻、技能、伤害跳字
+- [x] 开局玩法选择 + 随时切换
 - [x] HUD、结算面板、重开
 - [x] 粒子与光效
+- [x] 摄像头手势识别模块（`src/input/hand/`，未接入主流程，见 Issue #3）
 
 后续可做：
 
 - [ ] 音效与背景音乐（`assets/audio/` 已就位）
 - [ ] 生物用图片替代 emoji（`assets/images/` 已就位）
 - [ ] 更多手势与生物
-- [ ] 技能系统（画复杂手势放大招）
+- [ ] 决斗模式加"连击"和"防御"手势（现在只有普攻和技能两种动作）
 - [ ] 移动端触屏适配优化
 - [ ] 排行榜 / 最高连击
 

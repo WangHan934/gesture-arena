@@ -70,6 +70,29 @@ body {
   font-size: 12px;
   letter-spacing: 1px;
   color: var(--text-dim);
+  flex: 1;
+  text-align: center;
+}
+
+/* 切换玩法按钮 */
+.mode-chip {
+  flex: none;
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(10, 16, 32, 0.6);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: inherit;
+  letter-spacing: 0.6px;
+  cursor: pointer;
+  transition: color 0.16s, border-color 0.16s, background 0.16s;
+}
+
+.mode-chip:hover {
+  color: #cfe0ff;
+  border-color: rgba(120, 160, 255, 0.5);
+  background: rgba(20, 32, 60, 0.85);
 }
 
 /* ---------------- 战场容器 ---------------- */
@@ -161,6 +184,12 @@ body {
   box-shadow: 0 0 10px rgba(160, 107, 255, 0.5);
 }
 
+/* 决斗模式：技能就绪时资源条变金色 */
+.fill-mana.ready {
+  background: linear-gradient(90deg, #b8860b, #ffd93d);
+  box-shadow: 0 0 12px rgba(255, 217, 61, 0.6);
+}
+
 /* 手势图例 */
 
 .legend {
@@ -185,7 +214,7 @@ body {
 .legend-item b {
   font-size: 13px;
   font-weight: 700;
-  color: #cfe0ff;
+  color: var(--accent, #cfe0ff);
 }
 
 /* ---------------- 控制条（法力 + 画板） ---------------- */
@@ -435,5 +464,187 @@ body {
 
   .hud-tr {
     right: 10px;
+  }
+}
+
+/* ==================================================================
+   全屏浮层：玩法选择 / 决斗选怪
+   ================================================================== */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(3, 6, 14, 0.72);
+  backdrop-filter: blur(6px);
+  z-index: 20;
+}
+
+.overlay.show {
+  display: flex;
+}
+
+.overlay-card {
+  width: min(760px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 30px 32px 26px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #131c33, #0b1120);
+  border: 1px solid var(--line);
+  box-shadow: 0 40px 100px -40px rgba(0, 0, 0, 0.95);
+}
+
+.overlay-head {
+  text-align: center;
+  margin-bottom: 22px;
+}
+
+.overlay-head h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+.overlay-sub {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+}
+
+/* ---------------- 玩法卡片 ---------------- */
+
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.mode-card {
+  display: block;
+  width: 100%;
+  padding: 18px 18px 16px;
+  text-align: left;
+  font-family: inherit;
+  border-radius: 15px;
+  border: 1px solid rgba(120, 160, 255, 0.18);
+  background: rgba(10, 16, 32, 0.6);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 0.14s, border-color 0.18s, background 0.18s, box-shadow 0.18s;
+}
+
+.mode-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent, var(--blue));
+  background: rgba(18, 28, 52, 0.9);
+  box-shadow: 0 18px 40px -22px var(--accent, var(--blue));
+}
+
+.mode-card-title {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--accent, #cfe0ff);
+  margin-bottom: 4px;
+}
+
+.mode-card-tag {
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  color: #9fb0d0;
+  margin-bottom: 9px;
+}
+
+.mode-card-desc {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-dim);
+}
+
+/* ---------------- 决斗选怪 ---------------- */
+
+.roster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.roster-card {
+  padding: 16px 10px 13px;
+  text-align: center;
+  font-family: inherit;
+  border-radius: 14px;
+  border: 1px solid rgba(120, 160, 255, 0.18);
+  background: rgba(10, 16, 32, 0.6);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 0.14s, border-color 0.18s, box-shadow 0.18s;
+}
+
+.roster-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent, var(--blue));
+  box-shadow: 0 16px 36px -20px var(--accent, var(--blue));
+}
+
+.roster-glyph {
+  font-size: 34px;
+  line-height: 1.2;
+  margin-bottom: 4px;
+}
+
+.roster-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent, #cfe0ff);
+  margin-bottom: 3px;
+}
+
+.roster-stats {
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  color: var(--text-dim);
+}
+
+.btn-ghost {
+  display: block;
+  margin: 0 auto;
+  padding: 8px 22px;
+  font-size: 12px;
+  background: transparent;
+  border-color: rgba(120, 160, 255, 0.28);
+  color: var(--text-dim);
+}
+
+.btn-ghost:hover {
+  box-shadow: none;
+  color: #cfe0ff;
+}
+
+/* ---------------- 窄屏 ---------------- */
+
+@media (max-width: 720px) {
+  .mode-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .overlay-card {
+    padding: 22px 18px 20px;
+  }
+
+  .overlay-head h2 {
+    font-size: 18px;
+  }
+
+  .mode-chip {
+    padding: 4px 10px;
+    font-size: 10px;
   }
 }

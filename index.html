@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Gesture Arena · 手势竞技场</title>
+  <meta name="description" content="用手势召唤生物、出招对战的网页游戏。塔防制与 1v1 决斗两种玩法。" />
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
   <link rel="stylesheet" href="src/ui/style.css" />
 </head>
@@ -12,27 +13,28 @@
 
     <header class="topbar">
       <div class="brand">GESTURE <span>ARENA</span></div>
-      <div class="tagline">画手势 · 召唤生物 · 攻破敌塔</div>
+      <div class="tagline" id="tagline">画手势 · 召唤生物 · 攻破敌塔</div>
+      <button class="mode-chip" id="switch-mode-btn" type="button">切换模式</button>
     </header>
 
     <!-- 战场：canvas 负责游戏世界，HUD 元素浮在上面 -->
     <div class="stage">
       <canvas id="battle-canvas" width="2000" height="840"></canvas>
 
-      <!-- 我方核心 -->
+      <!-- 我方 -->
       <div class="hud hud-tl">
         <div class="hp-label">
-          <span>我方核心</span>
+          <span id="player-hp-label">我方核心</span>
           <span id="player-hp-text">300 / 300</span>
         </div>
         <div class="hp-bar"><i id="player-hp-fill" class="fill-player"></i></div>
       </div>
 
-      <!-- 敌方核心 -->
+      <!-- 敌方 -->
       <div class="hud hud-tr">
         <div class="hp-label">
           <span id="enemy-hp-text">300 / 300</span>
-          <span>敌方核心</span>
+          <span id="enemy-hp-label">敌方核心</span>
         </div>
         <div class="hp-bar"><i id="enemy-hp-fill" class="fill-enemy"></i></div>
       </div>
@@ -50,20 +52,16 @@
       </div>
     </div>
 
-    <!-- 控制条：法力 + 手势图例 + 画板（放在战场下方，不遮挡画面） -->
+    <!-- 控制条：资源 + 手势图例 + 画板（放在战场下方，不遮挡画面） -->
     <div class="controlbar">
       <div class="mana-panel">
         <div class="hp-label">
-          <span>法力</span>
+          <span id="mana-label">法力</span>
           <span id="mana-text">30 / 100</span>
         </div>
         <div class="hp-bar mana-bar"><i id="mana-fill" class="fill-mana"></i></div>
-        <div class="legend">
-          <div class="legend-item"><b>○</b>石灵 25</div>
-          <div class="legend-item"><b>—</b>焰狐 20</div>
-          <div class="legend-item"><b>Z</b>雷鸟 40</div>
-          <div class="legend-item"><b>V</b>巨魔 45</div>
-        </div>
+        <!-- 图例由 main.js 按当前模式动态生成 -->
+        <div class="legend" id="legend"></div>
       </div>
 
       <div class="pad" id="pad">
@@ -81,6 +79,29 @@
       </p>
     </div>
 
+  </div>
+
+  <!-- ================= 模式选择 ================= -->
+  <div class="overlay" id="mode-select" aria-hidden="true">
+    <div class="overlay-card">
+      <div class="overlay-head">
+        <h2>选择玩法</h2>
+        <p class="overlay-sub">切换玩法会重开一局</p>
+      </div>
+      <div class="mode-grid" id="mode-grid"></div>
+    </div>
+  </div>
+
+  <!-- ================= 决斗：选怪 ================= -->
+  <div class="overlay" id="duel-select" aria-hidden="true">
+    <div class="overlay-card">
+      <div class="overlay-head">
+        <h2>选择你的生物</h2>
+        <p class="overlay-sub">线条类手势 = 普攻 · 图形类手势 = 技能</p>
+      </div>
+      <div class="roster-grid" id="roster-grid"></div>
+      <button class="btn btn-ghost" id="duel-back-btn" type="button">换个玩法</button>
+    </div>
   </div>
 
   <script>

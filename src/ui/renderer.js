@@ -39,12 +39,15 @@ export class Renderer {
     return stars;
   }
 
+  /** 清屏。两种玩法共用一块 canvas，切换前统一清一次。 */
+  clear() {
+    this.ctx.clearRect(0, 0, WORLD.width, WORLD.height);
+  }
+
   /** @param {import('../battle/battle.js').Battle} battle */
-  render(battle) {
+  renderTower(battle) {
     const ctx = this.ctx;
     const t = performance.now() / 1000;
-
-    ctx.clearRect(0, 0, WORLD.width, WORLD.height);
 
     this._drawSky(ctx, t);
     this._drawGround(ctx);
