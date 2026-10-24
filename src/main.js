@@ -1,531 +1,116 @@
-/**
- * 游戏主入口
- * ------------------------------------------------------------------
- * 这一层只做「接线」：
- *   选模式 → 创建模式实例 → 把手势接给它 → 启动主循环 → 按模式挑渲染器
- *
- * 不含任何游戏规则。要改玩法去 src/modes/，改数值去 config.js。
- */
-
-import { Renderer } from './ui/renderer.js';
-import { HUD } from './ui/hud.js';
+import { RoomClient } from './network/client.js';
+import { MONSTERS, SPELLS } from './pvp/rules.js';
 import { GestureCanvas } from './input/gesture-canvas.js';
+import { recognizeSpell } from './input/gesture-recognizer.js';
 import { CameraInput } from './input/camera-input.js';
-import { KeyboardInput, resolveModeAction, isGlobalKey } from './input/keyboard-input.js';
-import { drawDuelScene } from './modes/duel-scene.js';
-import {
-  MODES,
-  MODE_IDS,
-  createMode,
-  resolveInitialMode,
-  rememberMode,
-} from './modes/index.js';
+import { AirStroke } from './input/air-stroke.js';
+import { SelectionScreen } from './ui/selection.js';
 
-const doc = document;
-
-/* ---------- 组装 ---------- */
-
-const hud = new HUD(doc);
-const renderer = new Renderer(doc.getElementById('battle-canvas'));
-
-/** 当前模式实例；null = 还没选玩法 */
-let mode = null;
-let modeId = null;
-
-/** 选玩法 / 选生物期间冻结推进，但画面继续画 */
-let paused = true;
-
-const gesture = new GestureCanvas(doc.getElementById('gesture-canvas'), {
-  onRecognized(result) {
-    if (!mode || paused) return;
-    const out = mode.handleGesture(result);
-    if (out?.message) hud.toast(out.message, out.ok ? 'ok' : 'warn');
-  },
+const $ = id => document.getElementById(id);
+let arenaView = null;
+let chosen = 'fire', state = null, connection = 'offline', pending = false, feedbackTimer, offset = 0;
+const client = new RoomClient({
+  onState(next) { const first=!state;state=next;if(first&&next.players[mySeat()]?.monster)chosen=next.players[mySeat()].monster;offset=next.serverNow-Date.now();render(); },
+  onConnection(status) { connection=status; render(); },
+  onExpired() { state=null; render(); tell('房间已过期，请重新创建或加入'); },
 });
-
-/* ---------- 摄像头手势（默认关闭，点按钮才开） ---------- */
-
-const camera = new CameraInput({
-  onPose(pose) {
-    if (!mode || paused) return;
-
-    const action = mode.cameraMap?.[pose];
-    if (!action) return; // 这个姿态在当前模式没有对应动作，静默忽略
-
-    const out = mode.handleAction(action);
-    if (out?.message) hud.toast(out.message, out.ok ? 'ok' : 'warn');
-
-    // 摄像头选了生物 → 关掉选怪浮层、开始对局
-    if (out?.started) startDuelBattle();
-  },
-  onStatus(status) {
-    updateCameraUi(status);
-
-    if (status.state === 'requesting') {
-      hud.toast('正在请求摄像头…', 'info');
-    } else if (status.state === 'ready') {
-      hud.toast('摄像头就绪，对着镜头比手势', 'ok');
-    } else if (status.state === 'error') {
-      // 具体原因（权限被拒 / 被占用 / 没设备）由左下角的摄像头面板显示 + 提供重试，
-      // 气泡只放一句短的，否则长文案会撑破气泡宽度
-      hud.toast('摄像头没开起来，鼠标照常能玩', 'warn');
-    }
-  },
+function tell(message){$('feedback').textContent=message;$('feedback').classList.add('show');clearTimeout(feedbackTimer);feedbackTimer=setTimeout(()=>$('feedback').classList.remove('show'),3000);}
+function mySeat(){return client.session?.seat??0;}
+function canCast(){return state?.battle && state.battle.winner===null && state.battle.turn===mySeat() && connection==='online' && !pending;}
+async function cast(id){
+  if(!canCast()){tell(connection!=='online'?'正在重连，请稍候':'请等待对手回合');return;}
+  pending=true;render();
+  try{const out=await client.action('cast',{spell:id});tell(out.message);}catch(error){tell(error.message);}finally{pending=false;render();}
+}
+const gesture=new GestureCanvas($('gesture-canvas'),{recognizer:recognizeSpell,onRecognized(result){if(result)cast(result.id);else tell('没认出来，请再画一次');}});
+const air=new AirStroke(points=>{const result=recognizeSpell(points);gesture.points=points;gesture.opacity=1;gesture.holdTimer=.7;if(result)cast(result.id);else tell('没认出来，放下手后再试一次');});
+const camera=new CameraInput({onStatus(status){$('camera-btn').textContent=camera.active?'关闭摄像头':'开启摄像头';$('camera-note').textContent=status.state==='ready'?'只伸食指在空中画符号，停住 1.5 秒提交；放下手后开始下一笔。':status.state==='error'?status.message:'鼠标、触屏均可绘制。';}});
+function roster(container){
+  container.replaceChildren();
+  for(const monster of MONSTERS){const button=document.createElement('button');button.type='button';button.className='monster';button.dataset.monster=monster.id;button.setAttribute('aria-pressed',String(chosen===monster.id));
+    const img=document.createElement('img');img.src=`art/renders/monsters/${monster.image}`;img.alt=monster.name+'模型预览';
+    const title=document.createElement('b');title.textContent=monster.name;const sub=document.createElement('small');sub.textContent='140 HP · 六种技能';button.append(img,title,sub);
+    button.addEventListener('click',()=>{chosen=monster.id;render();});container.append(button);
+  }
+}
+const selection = new SelectionScreen(id => { chosen=id; arenaView?.setSelection(id); render(); });
+roster($('room-roster'));
+for(const spell of SPELLS){const button=document.createElement('button');button.type='button';button.className='spell';button.dataset.spell=spell.id;button.title=spell.hint;button.setAttribute('aria-label',spell.name);
+  const glyph=document.createElement('span');glyph.className='glyph';glyph.textContent=spell.glyph;const title=document.createElement('b');title.textContent=spell.name;const hint=document.createElement('small');hint.textContent=spell.hint;const key=document.createElement('kbd');key.textContent=spell.key;button.append(glyph,title,hint,key);button.addEventListener('click',()=>cast(spell.id));$('spells').append(button);
+}
+function render(){
+  arenaView?.setState(state,mySeat());
+  const room=Boolean(client.session);$('home').hidden=room;$('room').hidden=!room;
+  document.body.classList.toggle('selecting',!room);$('game-topbar').hidden=!room;$('game-footer').hidden=!room;
+  selection.update(chosen,!room);arenaView?.setSelection(chosen);
+  $('connection').textContent=room?({online:'● 房间已连接',connecting:'正在连接…',reconnecting:'连接中断，正在重连…',offline:'未连接'}[connection]):'双人联网 · 回合对战';$('connection').classList.toggle('online',connection==='online');
+  for(const b of document.querySelectorAll('[data-monster]')){b.classList.toggle('selected',b.dataset.monster===chosen);b.setAttribute('aria-pressed',String(b.dataset.monster===chosen));b.disabled=Boolean(state?.players[mySeat()]?.ready && b.closest('#room-roster'));}
+  if(!room||!state)return;
+  $('room-id').textContent=client.session.roomId;
+  const battle=state.battle;const seat=mySeat();const self=state.players[seat];const enemy=state.players[1-seat];
+  $('lobby').hidden=Boolean(battle);$('battle').hidden=!battle;
+  if(!battle){
+    $('lobby-players').replaceChildren();
+    for(let i=0;i<2;i++){const p=state.players[i];const box=document.createElement('div');box.className='player-slot';const title=document.createElement('strong');title.textContent=p?`${p.name}${i===seat?'（你）':''}`:'等待朋友加入…';const status=document.createElement('span');status.textContent=p?`${p.online?'在线':'已断线'} · ${p.ready?'已准备':'选择怪兽中'}`:'分享房间码即可邀请';box.append(title,status);$('lobby-players').append(box);}
+    $('ready-btn').disabled=Boolean(self?.ready)||connection!=='online';$('ready-btn').textContent=self?.ready?'已准备，等待对手…':'锁定怪兽，准备对战';return;
+  }
+  const a=battle.players[seat],b=battle.players[1-seat];
+  $('self-name').textContent=self?.name||'你';$('enemy-name').textContent=enemy?.name||'对手';
+  $('self-hp').textContent=`${a.hp} / 140`;$('enemy-hp').textContent=`${b.hp} / 140`;$('self-health').value=a.hp;$('enemy-health').value=b.hp;
+  const buffs=p=>[p.shield?'护盾生效':'',p.support?'援军就绪':''].filter(Boolean).join(' · ');
+  $('self-buffs').textContent=buffs(a);$('enemy-buffs').textContent=`${enemy?.online?'':'对手断线 · '}${buffs(b)}`;
+  $('turn-label').textContent=battle.winner!==null?'对战结束':battle.turn===seat?'你的回合 · 画出技能符号':'对手回合 · 等待出招';$('turn-count').textContent=`第 ${battle.turns} 回合`;
+  $('pad-label').textContent=canCast()?'按住拖拽，松开施法':'等待对手出招';
+  for(const button of document.querySelectorAll('[data-spell]')){const id=button.dataset.spell,spell=SPELLS.find(s=>s.id===id),cd=Math.max(0,(a.cooldowns[id]||0)-(battle.turn!==seat?1:0));button.disabled=!canCast()||cd>0;button.querySelector('small').textContent=cd>0?`冷却 ${cd} 个己方回合`:spell.hint;}
+  $('battle-log').replaceChildren(...battle.log.slice(-4).map(text=>{const li=document.createElement('li');li.textContent=text;return li;}));
+  $('result').hidden=battle.winner===null;
+  if(battle.winner!==null){$('result-title').textContent=battle.winner==='draw'?'势均力敌':battle.winner===seat?'对决胜利':'下次再战';$('result-detail').textContent=`共 ${battle.turns} 回合 · 双方确认后再战`;$('rematch-btn').disabled=Boolean(self?.rematch)||connection!=='online';$('rematch-btn').textContent=self?.rematch?'等待对手确认…':'再战一局';}
+}
+async function enter(join){
+  const code=$('room-code').value.trim().toUpperCase();if(join&&!/^[A-F0-9]{6}$/.test(code)){tell('请输入六位房间码');return;}
+  $('create-room').disabled=$('join-room').disabled=true;
+  try{await client.enter(join?code:null,{name:$('player-name').value,monster:chosen});const u=new URL(location.href);u.searchParams.set('room',client.session.roomId);history.replaceState(null,'',u);render();}catch(error){tell(error.message);}finally{$('create-room').disabled=$('join-room').disabled=false;}
+}
+$('entry-form').addEventListener('submit',event=>{event.preventDefault();enter(false);});$('join-room').addEventListener('click',()=>enter(true));
+$('ready-btn').addEventListener('click',async()=>{try{await client.action('ready',{monster:chosen});}catch(error){tell(error.message);}});
+$('rematch-btn').addEventListener('click',async()=>{try{await client.action('rematch');}catch(error){tell(error.message);}});
+$('leave-room').addEventListener('click',async()=>{camera.disable();await client.leave().catch(()=>{});state=null;gesture.clear();air.reset();const u=new URL(location.href);u.searchParams.delete('room');history.replaceState(null,'',u);render();});
+$('copy-invite').addEventListener('click',async()=>{const link=new URL(location.href);link.search='';link.searchParams.set('room',client.session.roomId);try{await navigator.clipboard.writeText(link.href);tell('邀请链接已复制');}catch{tell(`房间码 ${client.session.roomId} · 请复制地址栏链接`);}});
+$('camera-btn').addEventListener('click',async()=>{const button=$('camera-btn');button.disabled=true;try{await camera.toggle();air.reset();}finally{button.disabled=false;}});
+window.addEventListener('keydown',event=>{if(event.repeat||event.isComposing||['INPUT','TEXTAREA'].includes(event.target.tagName)||event.target.isContentEditable)return;const match=/^(?:Digit|Numpad)([1-6])$/.exec(event.code);if(match&&state?.battle){event.preventDefault();cast(SPELLS[Number(match[1])-1].id);}});
+window.addEventListener('pagehide',()=>{camera.disable();client.stopStream();});
+window.addEventListener('pageshow',event=>{if(event.persisted&&client.session)client.connect();});
+const query=new URLSearchParams(location.search).get('room');if(query)$('room-code').value=query.toUpperCase();
+const restored=client.restore();render();if(query&&!restored)selection.open();
+import('./pvp/scene-3d.js').then(({ Arena3D }) => {
+  arenaView = new Arena3D($('battle-canvas'), (status, message) => {
+    $('model-status').textContent = message;
+    $('model-status').dataset.state = status;
+    if (status === 'error') tell(message);
+  });
+  arenaView.setSelection(chosen);
+  arenaView.setState(state,mySeat());
+  arenaView.ready.catch(error => {
+    console.error('[3D] 模型加载失败',error);
+    $('model-status').textContent = '3D 模型加载失败：' + error.message;
+    $('model-status').dataset.state = 'error';
+    tell($('model-status').textContent);
+  });
+}).catch(error => {
+  console.error('[3D] 渲染初始化失败',error);
+  $('model-status').textContent = '3D 初始化失败，请确认浏览器已启用 WebGL 2：' + error.message;
+  $('model-status').dataset.state = 'error';
+  tell($('model-status').textContent);
 });
-
-/* ---------- 键盘备用控制（比赛兜底） ---------- */
-
-/**
- * 键盘不是「另一套玩法」，而是和手势走同一条路：
- * 按键 → 动作 → mode.handleAction()，冷却 / 射程 / 法力判断全部复用。
- *
- * 上下文优先级：结果面板 > 玩法选择 > 选怪 > 全局 > 模式动作。
- * 这样「开始 → 选玩法 → 选怪 → 战斗 → 胜负 → 重开」整条链都能纯键盘走完。
- */
-const keyboard = new KeyboardInput({
-  onKey(code, event) {
-    // 1. 结算面板：回车 = 再来一局
-    if (isShown('result') && code === 'Enter') {
-      event.preventDefault();
-      doc.getElementById('restart-btn').click();
-      return;
-    }
-
-    // 2. 玩法选择：1 = 塔防，2 = 决斗
-    if (isShown('mode-select')) {
-      if (code === 'Digit1' || code === 'Numpad1') switchMode('tower');
-      else if (code === 'Digit2' || code === 'Numpad2') switchMode('duel');
-      return;
-    }
-
-    // 3. 决斗选怪：1~4 选第几只，Esc 退回玩法选择
-    if (isShown('duel-select')) {
-      const m = /^(?:Digit|Numpad)([1-4])$/.exec(code);
-      if (m) {
-        const unit = mode?.roster?.[Number(m[1]) - 1];
-        if (unit) pickMonster(unit.id);
-        return;
-      }
-      if (code === 'Escape') doc.getElementById('duel-back-btn').click();
-      return;
-    }
-
-    // 4. 全局键
-    if (code === 'Escape') {
-      openModeSelect();
-      return;
-    }
-    if (code === 'KeyC') {
-      doc.getElementById('camera-btn').click();
-      return;
-    }
-    if (isGlobalKey(code)) return;
-
-    // 5. 模式动作
-    if (!mode || paused) return;
-    const action = resolveModeAction(code, mode);
-    if (!action) return;
-
-    event.preventDefault();
-    const out = mode.handleAction(action);
-    if (out?.message) hud.toast(out.message, out.ok ? 'ok' : 'warn');
-    if (out?.started) startDuelBattle();
-    renderKeyHint(); // 阶段可能变了（选怪 → 战斗），提示要跟着换
-  },
-});
-
-/* ---------- 小工具 ---------- */
-
-/** 某个浮层 / 面板是不是正开着 */
-function isShown(id) {
-  return doc.getElementById(id)?.classList.contains('show') ?? false;
-}
-
-function safeStorage() {
-  try {
-    return window.localStorage;
-  } catch {
-    return null; // 隐私模式下 localStorage 会抛错
+let previous=performance.now();
+function frame(now){const dt=Math.min(.05,(now-previous)/1000);previous=now;
+  if(state?.battle){const seconds=Math.max(0,Math.ceil((state.battle.deadline-Date.now()-offset)/1000));$('clock').textContent=state.battle.winner===null?`${seconds}s`:'—';}
+  try { arenaView?.update(dt); } catch (error) {
+    console.error('[3D] 渲染帧失败', error);
+    arenaView = null;
+    $('model-status').textContent = '3D 渲染失败，请刷新页面：' + error.message;
+    $('model-status').dataset.state = 'error';
+    tell($('model-status').textContent);
   }
-}
-
-function showOverlay(id) {
-  const el = doc.getElementById(id);
-  if (!el) return;
-  el.classList.add('show');
-  el.setAttribute('aria-hidden', 'false');
-}
-
-function hideOverlay(id) {
-  const el = doc.getElementById(id);
-  if (!el) return;
-  el.classList.remove('show');
-  el.setAttribute('aria-hidden', 'true');
-}
-
-/** 打开玩法选择浮层。按钮、Esc、选怪返回三处共用，避免漏掉提示刷新 */
-function openModeSelect() {
-  paused = true;
-  showOverlay('mode-select');
-  renderKeyHint();
-}
-
-/** 按当前模式重画控制条上的手势图例 */
-function renderLegend(items) {
-  const box = doc.getElementById('legend');
-  if (!box) return;
-  box.innerHTML = '';
-
-  for (const item of items) {
-    const row = doc.createElement('div');
-    row.className = 'legend-item';
-    row.style.setProperty('--accent', item.color || '#9dc4ff');
-
-    const glyph = doc.createElement('b');
-    glyph.textContent = item.glyph;
-
-    row.appendChild(glyph);
-    row.appendChild(doc.createTextNode(item.label));
-    if (item.cost != null) {
-      row.appendChild(doc.createTextNode(` ${item.cost}`));
-    }
-    box.appendChild(row);
-  }
-}
-
-/* ---------- 摄像头 UI ---------- */
-
-/**
- * 摄像头开关按钮的状态
- * @param {{state:string, message:string}} status
- */
-function updateCameraUi(status) {
-  const btn = doc.getElementById('camera-btn');
-  if (!btn) return;
-
-  const on = status.state === 'ready' || status.state === 'requesting';
-  btn.classList.toggle('on', on);
-  // 开启时把游戏整体收窄，给左下角的摄像头画中画让出位置（原因见 style.css 的 --camera-reserve）
-  doc.body.classList.toggle('camera-on', on);
-  btn.textContent = status.state === 'requesting'
-    ? '摄像头…'
-    : on ? '摄像头 开' : '摄像头';
-  btn.title = status.message || '开启摄像头手势';
-}
-
-/**
- * 摄像头开着的时候，在图例下方显示「比什么手势 = 干什么」。
- * 关着就整块隐藏，不占地方。
- */
-function renderCameraHint() {
-  const box = doc.getElementById('camera-hint');
-  if (!box) return;
-
-  const items = camera.active ? (mode?.getCameraHint?.() ?? []) : [];
-  box.innerHTML = '';
-  box.classList.toggle('show', items.length > 0);
-
-  for (const item of items) {
-    const row = doc.createElement('span');
-    row.className = 'camera-hint-item';
-
-    const glyph = doc.createElement('b');
-    glyph.textContent = item.glyph;
-
-    row.appendChild(glyph);
-    row.appendChild(doc.createTextNode(item.label));
-    box.appendChild(row);
-  }
-}
-
-/**
- * 控制条上的键盘提示。
- * 比赛现场不一定有人记得住键位，所以常驻显示，按当前阶段变化。
- */
-function renderKeyHint() {
-  const box = doc.getElementById('key-hint');
-  if (!box) return;
-
-  // 提示跟着当前上下文变，不然选玩法时还显示「Z 普攻」会让人困惑
-  let items;
-  if (isShown('mode-select')) {
-    items = [
-      { keys: '1', label: '塔防制' },
-      { keys: '2', label: '1v1 决斗' },
-    ];
-  } else if (isShown('duel-select')) {
-    items = [
-      { keys: '1~4', label: '选生物' },
-      { keys: 'Esc', label: '换个玩法' },
-    ];
-  } else {
-    items = [
-      ...(mode?.getKeyHint?.() ?? []),
-      { keys: 'Enter', label: '再来一局' },
-      { keys: 'Esc', label: '切换玩法' },
-      { keys: 'C', label: '摄像头' },
-    ];
-  }
-
-  box.innerHTML = '';
-  for (const item of items) {
-    const row = doc.createElement('span');
-    row.className = 'key-hint-item';
-
-    const kbd = doc.createElement('kbd');
-    kbd.textContent = item.keys;
-
-    row.appendChild(kbd);
-    row.appendChild(doc.createTextNode(item.label));
-    box.appendChild(row);
-  }
-}
-
-/* ---------- 模式选择界面 ---------- */
-
-function buildModeCards() {
-  const grid = doc.getElementById('mode-grid');
-  if (!grid) return;
-  grid.innerHTML = '';
-
-  for (const id of MODE_IDS) {
-    const def = MODES[id];
-    const card = doc.createElement('button');
-    card.type = 'button';
-    card.className = 'mode-card';
-    card.style.setProperty('--accent', def.accent);
-    card.dataset.mode = id;
-
-    const title = doc.createElement('div');
-    title.className = 'mode-card-title';
-    title.textContent = def.name;
-
-    // 键盘快捷键角标：比赛现场不用鼠标也能选
-    const keyBadge = doc.createElement('kbd');
-    keyBadge.className = 'mode-card-key';
-    keyBadge.textContent = String(MODE_IDS.indexOf(id) + 1);
-    title.appendChild(keyBadge);
-
-    const tag = doc.createElement('div');
-    tag.className = 'mode-card-tag';
-    tag.textContent = def.tagline;
-
-    const desc = doc.createElement('div');
-    desc.className = 'mode-card-desc';
-    desc.textContent = def.desc;
-
-    card.append(title, tag, desc);
-    card.addEventListener('click', () => switchMode(id));
-    grid.appendChild(card);
-  }
-}
-
-/* ---------- 决斗：选生物界面 ---------- */
-
-function buildRoster() {
-  const grid = doc.getElementById('roster-grid');
-  if (!grid) return;
-  grid.innerHTML = '';
-
-  const list = mode?.roster ?? [];
-  if (!list.length) {
-    const empty = doc.createElement('p');
-    empty.className = 'overlay-sub';
-    empty.textContent = '没读到生物表，请检查 src/summon/creature-data.js';
-    grid.appendChild(empty);
-    return;
-  }
-
-  for (const [index, unit] of list.entries()) {
-    const card = doc.createElement('button');
-    card.type = 'button';
-    card.className = 'roster-card';
-    card.style.setProperty('--accent', unit.color);
-
-    // 键盘快捷键角标（摄像头只能选前三只，键盘能选全）
-    const keyBadge = doc.createElement('kbd');
-    keyBadge.className = 'roster-key';
-    keyBadge.textContent = String(index + 1);
-
-    const glyph = doc.createElement('div');
-    glyph.className = 'roster-glyph';
-    glyph.textContent = unit.glyph;
-
-    const name = doc.createElement('div');
-    name.className = 'roster-name';
-    name.textContent = unit.name;
-
-    const stats = doc.createElement('div');
-    stats.className = 'roster-stats';
-    stats.textContent = `血 ${unit.maxHp} · 攻 ${unit.attack} · 速 ${unit.speed}`;
-
-    card.append(keyBadge, glyph, name, stats);
-    card.addEventListener('click', () => pickMonster(unit.id));
-    grid.appendChild(card);
-  }
-}
-
-function openDuelSelect() {
-  paused = true;
-  buildRoster();
-  showOverlay('duel-select');
-  renderKeyHint();
-}
-
-function pickMonster(id) {
-  if (!mode || typeof mode.selectMonster !== 'function') return;
-  const res = mode.selectMonster(id);
-  if (!res.ok) {
-    hud.toast(res.message ?? '选不了这只生物', 'warn');
-    return;
-  }
-  startDuelBattle();
-}
-
-/** 生物选定后：关掉选怪浮层、解冻主循环。鼠标点和摄像头选都走这里 */
-function startDuelBattle() {
-  hideOverlay('duel-select');
-  paused = false;
-  hud.hideResult();
-  renderCameraHint(); // 决斗开打后对照表从「选怪」切成「普攻 / 技能」
-  renderKeyHint();    // 键盘提示同理
-  hud.toast('决斗开始', 'ok');
-}
-
-/* ---------- 切换玩法 ---------- */
-
-function switchMode(id) {
-  if (!MODES[id]) return;
-
-  modeId = id;
-  mode = createMode(id);
-  rememberMode(id, safeStorage());
-
-  // 界面按模式调整
-  doc.body.dataset.mode = id;
-  const tagline = doc.getElementById('tagline');
-  if (tagline) tagline.textContent = MODES[id].tagline;
-
-  renderLegend(mode.getLegend());
-  renderCameraHint();
-  hud.hideResult();
-  gesture.clear();
-  hideOverlay('mode-select');
-  // 注意顺序：renderKeyHint 会读「浮层是否还开着」来决定显示哪套提示，
-  // 所以必须放在 hideOverlay 之后，否则会一直停在「1 塔防 / 2 决斗」。
-  renderKeyHint();
-
-  if (id === 'duel') {
-    openDuelSelect();
-    return;
-  }
-
-  hideOverlay('duel-select');
-  paused = false;
-  renderKeyHint();
-  hud.toast('塔防制：画手势召唤生物', 'ok');
-}
-
-/* ---------- 画板交互细节 ---------- */
-
-const pad = doc.getElementById('pad');
-pad.addEventListener('pointerdown', () => pad.classList.add('drawing'));
-for (const evt of ['pointerup', 'pointercancel', 'pointerleave']) {
-  pad.addEventListener(evt, () => pad.classList.remove('drawing'));
-}
-
-/* ---------- 按钮 ---------- */
-
-doc.getElementById('restart-btn').addEventListener('click', () => {
-  if (!mode) return;
-
-  hud.hideResult();
-  gesture.clear();
-
-  const out = mode.restart();
-  if (modeId === 'duel') {
-    openDuelSelect();
-    renderKeyHint(); // 回到选怪阶段，提示换回「1~4 选生物」
-    return;
-  }
-
-  paused = false;
-  if (out?.message) hud.toast(out.message, 'ok');
-});
-
-doc.getElementById('switch-mode-btn').addEventListener('click', openModeSelect);
-
-doc.getElementById('duel-back-btn').addEventListener('click', () => {
-  hideOverlay('duel-select');
-  openModeSelect();
-});
-
-// 摄像头开关：第一次点才请求权限，失败也只提示，不影响鼠标玩法
-doc.getElementById('camera-btn').addEventListener('click', async () => {
-  const btn = doc.getElementById('camera-btn');
-  btn.disabled = true;
-  try {
-    await camera.toggle();
-  } finally {
-    btn.disabled = false;
-    renderCameraHint();
-  }
-});
-
-/* ---------- 空视图（还没选玩法时） ---------- */
-
-const EMPTY_VIEW = {
-  mode: 'duel',
-  phase: 'select',
-  result: null,
-  time: 0,
-  hud: {
-    left: { label: '我方', hp: 0, maxHp: 1, ratio: 0 },
-    right: { label: '对手', hp: 0, maxHp: 1, ratio: 0 },
-    resource: { label: '资源', value: '', max: '', ratio: 0 },
-  },
-  legend: [],
-  world: null,
-  stats: { detail: '' },
-};
-
-/* ---------- 主循环 ---------- */
-
-let last = performance.now();
-
-function frame(now) {
-  // 限制单帧步长，切标签页回来时不会瞬间跳一大段
-  const dt = Math.min((now - last) / 1000, 0.05);
-  last = now;
-
-  if (mode && !paused) mode.update(dt);
-  gesture.update(dt);
-
-  const view = mode ? mode.getView() : EMPTY_VIEW;
-
-  renderer.clear();
-  if (view.mode === 'duel') {
-    drawDuelScene(renderer.ctx, view.world, now / 1000, renderer.stars);
-  } else {
-    renderer.renderTower(view.world);
-  }
-
-  gesture.render();
-  hud.update(view);
-
-  requestAnimationFrame(frame);
-}
-
-/* ---------- 启动 ---------- */
-
-buildModeCards();
-
-const initial = resolveInitialMode(window.location.search, safeStorage());
-if (initial) {
-  switchMode(initial);
-} else {
-  showOverlay('mode-select');
-}
-renderKeyHint();
-
-requestAnimationFrame(frame);
+  gesture.update(dt);air.update(camera.getFrame(now),now,canCast()&&camera.active);if(air.points.length){gesture.points=air.points.slice();gesture.opacity=1;gesture.holdTimer=.1;}gesture.render();requestAnimationFrame(frame);
+}requestAnimationFrame(frame);

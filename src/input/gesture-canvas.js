@@ -17,10 +17,11 @@ export class GestureCanvas {
    * @param {HTMLCanvasElement} canvas
    * @param {{ onRecognized: (result: {id:string, score:number} | null) => void }} options
    */
-  constructor(canvas, { onRecognized }) {
+  constructor(canvas, { onRecognized, recognizer = recognize }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.onRecognized = onRecognized;
+    this.recognizer = recognizer;
 
     this.points = [];
     this.drawing = false;
@@ -65,7 +66,7 @@ export class GestureCanvas {
       this.drawing = false;
       if (e) e.preventDefault();
 
-      const result = recognize(this.points);
+      const result = this.recognizer(this.points);
       this.holdTimer = GESTURE.fadeDelay;
       this.onRecognized?.(result);
     };

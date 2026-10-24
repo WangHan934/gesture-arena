@@ -1,12 +1,15 @@
 {
   "name": "gesture-arena",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "手势竞技场 —— 画手势召唤生物 / 出招对战的网页游戏",
+  "description": "空绘兽斗：两台设备联网、画符号施法的怪兽 PvP",
   "scripts": {
-    "start": "python -m http.server 8000",
-    "test": "node src/battle/battle-system.test.mjs && node tests/gesture.test.mjs && node tests/duel-range.test.mjs && node tests/keyboard.test.mjs && node tests/hand.test.mjs",
+    "start": "node server.mjs",
+    "test": "node src/battle/battle-system.test.mjs && node tests/gesture.test.mjs && node tests/duel-range.test.mjs && node tests/keyboard.test.mjs && node tests/hand.test.mjs && node --test tests/pvp.test.mjs tests/pvp-network.test.mjs tests/models.test.mjs",
     "balance": "node src/modes/duel-balance.mjs"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
