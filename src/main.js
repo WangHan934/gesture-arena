@@ -4,12 +4,13 @@ import { GestureCanvas } from './input/gesture-canvas.js';
 import { recognizeSpell } from './input/gesture-recognizer.js';
 import { CameraInput } from './input/camera-input.js';
 import { AirStroke } from './input/air-stroke.js';
+import { SelectionScreen } from './ui/selection.js';
 
 const $ = id => document.getElementById(id);
 let arenaView = null;
 let chosen = 'fire', state = null, connection = 'offline', pending = false, feedbackTimer, offset = 0;
 const client = new RoomClient({
-  onState(next) { state=next; offset=next.serverNow-Date.now(); render(); },
+  onState(next) { const first=!state;state=next;if(first&&next.players[mySeat()]?.monster)chosen=next.players[mySeat()].monster;offset=next.serverNow-Date.now();render(); },
   onConnection(status) { connection=status; render(); },
   onExpired() { state=null; render(); tell('房间已过期，请重新创建或加入'); },
 });
@@ -32,13 +33,16 @@ function roster(container){
     button.addEventListener('click',()=>{chosen=monster.id;render();});container.append(button);
   }
 }
-roster($('home-roster'));roster($('room-roster'));
+const selection = new SelectionScreen(id => { chosen=id; arenaView?.setSelection(id); render(); });
+roster($('room-roster'));
 for(const spell of SPELLS){const button=document.createElement('button');button.type='button';button.className='spell';button.dataset.spell=spell.id;button.title=spell.hint;button.setAttribute('aria-label',spell.name);
   const glyph=document.createElement('span');glyph.className='glyph';glyph.textContent=spell.glyph;const title=document.createElement('b');title.textContent=spell.name;const hint=document.createElement('small');hint.textContent=spell.hint;const key=document.createElement('kbd');key.textContent=spell.key;button.append(glyph,title,hint,key);button.addEventListener('click',()=>cast(spell.id));$('spells').append(button);
 }
 function render(){
   arenaView?.setState(state,mySeat());
   const room=Boolean(client.session);$('home').hidden=room;$('room').hidden=!room;
+  document.body.classList.toggle('selecting',!room);$('game-topbar').hidden=!room;$('game-footer').hidden=!room;
+  selection.update(chosen,!room);arenaView?.setSelection(chosen);
   $('connection').textContent=room?({online:'● 房间已连接',connecting:'正在连接…',reconnecting:'连接中断，正在重连…',offline:'未连接'}[connection]):'双人联网 · 回合对战';$('connection').classList.toggle('online',connection==='online');
   for(const b of document.querySelectorAll('[data-monster]')){b.classList.toggle('selected',b.dataset.monster===chosen);b.setAttribute('aria-pressed',String(b.dataset.monster===chosen));b.disabled=Boolean(state?.players[mySeat()]?.ready && b.closest('#room-roster'));}
   if(!room||!state)return;
@@ -77,13 +81,14 @@ window.addEventListener('keydown',event=>{if(event.repeat||event.isComposing||['
 window.addEventListener('pagehide',()=>{camera.disable();client.stopStream();});
 window.addEventListener('pageshow',event=>{if(event.persisted&&client.session)client.connect();});
 const query=new URLSearchParams(location.search).get('room');if(query)$('room-code').value=query.toUpperCase();
-client.restore();render();
+const restored=client.restore();render();if(query&&!restored)selection.open();
 import('./pvp/scene-3d.js').then(({ Arena3D }) => {
   arenaView = new Arena3D($('battle-canvas'), (status, message) => {
     $('model-status').textContent = message;
     $('model-status').dataset.state = status;
     if (status === 'error') tell(message);
   });
+  arenaView.setSelection(chosen);
   arenaView.setState(state,mySeat());
   arenaView.ready.catch(error => {
     console.error('[3D] 模型加载失败',error);

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MONSTERS } from './rules.js';
 import { GLTFLoader } from '../../vendor/three/examples/jsm/loaders/GLTFLoader.js';
 import { clone } from '../../vendor/three/examples/jsm/utils/SkeletonUtils.js';
 
@@ -14,6 +15,7 @@ export class Arena3D {
     this.canvas = canvas;
     this.onStatus = onStatus;
     this.state = null;
+    this.selectedMonster = 'fire';
     this.seat = 0;
     this.fighters = [];
     this.gallery = [];
@@ -65,6 +67,7 @@ export class Arena3D {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    if (this.loaded && !this.state) this.frameSelection();
   }
 
   async load() {
@@ -120,7 +123,7 @@ export class Arena3D {
     root.add(object);
     root.scale.setScalar(height / Math.max(.001, size.y));
     const mixer = new THREE.AnimationMixer(object);
-    return { id, root, object, mixer, clips: template.animations, action: null, timer: 0, dead: false };
+    return { id, height, root, object, mixer, clips: template.animations, action: null, timer: 0, dead: false };
   }
 
   play(model, name, once = false) {
@@ -137,13 +140,32 @@ export class Arena3D {
     model.timer = once && name !== 'Death' ? clip.duration : 0;
   }
 
+  setSelection(id) {
+    if (!['fire', 'shadow', 'rock'].includes(id) || id === this.selectedMonster) return;
+    this.selectedMonster = id;
+    this.canvas.dataset.selectedMonster = id;
+    this.signature = '';
+  }
+
+  frameSelection() {
+    const model = this.gallery.find(m => m.id === this.selectedMonster);
+    if (!model) return;
+    model.root.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(model.root);
+    const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
+    const tangent = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    const distance = Math.max(9, size.y / (2 * tangent), size.x / (2 * tangent * this.camera.aspect)) * (this.camera.aspect < 1.1 ? 1.6 : 1.3);
+    this.camera.position.set(center.x, center.y + distance * .12, center.z + distance);
+    this.camera.lookAt(center);
+  }
+
   setState(state, seat) {
     this.state = state;
     this.seat = seat;
     const battle = state?.battle;
     const host = battle ? 'battle-view' : state ? 'lobby-preview' : 'model-preview';
     this.mount(document.getElementById(host));
-    const signature = battle ? state.players.map(p => p?.monster || '').join('|') + ':' + seat : 'gallery';
+    const signature = battle ? state.players.map(p => p?.monster || '').join('|') + ':' + seat : state ? 'gallery' : 'selection:' + this.selectedMonster;
     if (!this.loaded || signature === this.signature) return;
     this.signature = signature;
     this.lastTurns = null;
@@ -154,7 +176,15 @@ export class Arena3D {
       this.scene.remove(fighter.root);
     }
     this.fighters = [];
-    for (const model of this.gallery) model.root.visible = !battle;
+    this.canvas.dataset.view = battle ? 'battle' : state ? 'lobby' : 'selection';
+    this.canvas.setAttribute('aria-label', battle ? '双方选中怪兽的 3D 对战与原始竞技场' : state ? '三个原始 3D 怪兽和竞技场' : `${MONSTERS.find(m => m.id === this.selectedMonster).name}与原始竞技场`);
+    this.canvas.dataset.selectedMonster = this.selectedMonster;
+    for (const [index, model] of this.gallery.entries()) {
+      model.root.visible = !battle && (state || model.id === this.selectedMonster);
+      model.root.position.set(state ? (index - 1) * 4.3 : 0, .26, 0);
+      model.root.scale.multiplyScalar((state ? 3.6 : 5.8) / model.height);
+      model.height = state ? 3.6 : 5.8;
+    }
     if (battle) {
       for (let i = 0; i < 2; i++) {
         const id = state.players[i]?.monster;

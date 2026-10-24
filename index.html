@@ -4,14 +4,26 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>空绘兽斗 · 怪兽 PvP</title>
 <meta name="description" content="两台设备，同一间竞技场。画符号施法的实时怪兽 PvP。">
-<link rel="icon" href="assets/favicon.svg"><link rel="stylesheet" href="src/ui/pvp.css">
+<link rel="icon" href="assets/selection-sigil.svg"><link rel="stylesheet" href="src/ui/pvp.css"><link rel="stylesheet" href="src/ui/selection.css">
 </head>
-<body>
-<header class="topbar"><a class="brand" href="/">空绘<span>兽斗</span><small>GESTURE ARENA</small></a><span class="connection" id="connection">双人联网 · 回合对战</span></header>
+<body class="selecting">
+<header class="topbar" id="game-topbar" hidden><a class="brand" href="/">空绘<span>兽斗</span><small>GESTURE ARENA</small></a><span class="connection" id="connection">双人联网 · 回合对战</span></header>
 <main>
-<section id="home" class="home">
-<div class="intro"><p class="eyebrow">DRAW YOUR POWER / 01</p><h1>一笔施法。<br><em>与真人怪兽对决。</em></h1><p class="lead">两台设备加入同一个房间，召唤你的怪兽。画出六种符号，决定这一回合的攻守。</p><div class="facts"><span>2 位玩家</span><span>6 种技能</span><span>45 秒 / 回合</span></div><div id="model-preview" class="model-preview"><canvas id="battle-canvas" class="model-canvas" aria-label="三个原始 3D 怪兽和竞技场"></canvas></div><p id="model-status" class="note" role="status">正在初始化 3D 场景…</p></div>
-<form class="panel" id="entry-form"><p class="eyebrow">ENTER THE ARENA</p><h2>准备入场</h2><label for="player-name">召唤师名字</label><input id="player-name" maxlength="18" placeholder="给自己取个名字" autocomplete="nickname" value="召唤师"><label>选择你的怪兽</label><div class="monster-grid" id="home-roster"></div><button class="primary" id="create-room" type="submit">创建对战房间 <span>→</span></button><div class="divider">或者加入朋友的房间</div><label for="room-code">六位房间码</label><div class="join-row"><input id="room-code" maxlength="6" placeholder="例如 A1B2C3" autocomplete="off" spellcheck="false"><button type="button" id="join-room">加入</button></div><p class="note">两台设备需打开同一个服务器地址。同一 Wi-Fi 可使用服务端显示的局域网地址；跨网络需要部署服务端。</p></form>
+<section id="home" class="summoner" aria-label="怪兽召唤与选择">
+<div class="grain" aria-hidden="true"></div>
+<div class="app" id="selector-app">
+<header class="topbar">
+ <div class="topbar-left"><img class="sigil" src="assets/selection-sigil.svg" alt=""><div class="brand"><h1 class="brand-title">MONSTER ARENA</h1><p class="brand-sub">空绘兽斗 · 召唤你的怪兽</p></div></div>
+ <div class="topbar-right"><p class="wallet"><span class="wallet-num">02</span><span class="wallet-unit">玩家 / PvP</span></p><button class="icon-btn" id="selection-sound" type="button" aria-pressed="false" aria-label="开启界面音效" title="界面音效"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4Z" fill="none" stroke="currentColor"/><path class="wave" d="M16 8a6 6 0 0 1 0 8M19 5a10 10 0 0 1 0 14" fill="none" stroke="currentColor"/><path class="mute" d="m16 9 6 6m0-6-6 6" fill="none" stroke="currentColor"/></svg></button></div>
+</header>
+<div class="layout">
+ <aside class="codex" aria-labelledby="codex-title"><div class="col-head"><p class="overline">BEAST CODEX</p><h2 class="col-title" id="codex-title">怪兽图鉴 <span class="col-count">3 / 3</span></h2></div><div class="codex-list" id="home-roster" role="tablist" aria-label="选择怪兽" aria-orientation="vertical"></div><p class="codex-note">三种外观，同等战力。<br>画下符号，决定你的下一招。</p><div class="codex-bottom"><span>原始 3D 模型</span><span>全部可选</span></div></aside>
+ <section class="stage" id="selection-stage" aria-label="选中怪兽与竞技场"><div id="model-preview" class="model-preview"><canvas id="battle-canvas" class="model-canvas" role="img" aria-label="炎角战魔与原始竞技场"></canvas></div><div class="stage-inner"><p class="watermark" id="selection-watermark" aria-hidden="true">INFERNAL HORNBEAST</p><div class="stage-atmos" aria-hidden="true"></div><div class="stage-frame" aria-hidden="true"><i class="f-t"></i><i class="f-b"></i><i class="f-l"></i><i class="f-r"></i><b class="rv rv-tl"></b><b class="rv rv-tr"></b><b class="rv rv-bl"></b><b class="rv rv-br"></b></div><div class="stage-hud"><span class="hud-hint"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 切换 <kbd>↵</kbd> 入场</span><span class="hud-elem" id="selection-element">烈焰</span></div></div><p id="model-status" class="selection-status" role="status">正在加载三个怪兽与竞技场…</p></section>
+ <aside class="detail" aria-labelledby="selection-name"><div class="detail-scroll"><div><p class="overline" id="selection-english">INFERNAL HORNBEAST</p><h2 class="detail-name" id="selection-name">炎角战魔</h2></div><p class="unit-meta"><span class="unit-class" id="selection-type">烈焰</span><span class="unit-sep">·</span><span>双人联网对战</span></p><p class="unit-lore" id="selection-lore"></p><ul class="stats" id="selection-stats" aria-label="实际对战数值"></ul><section class="skills" aria-labelledby="selection-skills-title"><h3 class="section-label" id="selection-skills-title">手势技能</h3><ul class="skill-list" id="selection-skills"></ul></section><section class="ultimate" aria-labelledby="selection-ult-title"><h3 class="section-label" id="selection-ult-title">终极</h3><p class="ult-name" id="selection-ultimate-name"></p><p class="ult-desc" id="selection-ultimate-desc"></p></section><p class="selection-fairness">双方生命与技能一致，怪兽外观自由选择。</p></div><button class="summon-btn" id="selection-enter" type="button"><span class="summon-btn-txt">召唤入场</span><span class="summon-btn-arrow" aria-hidden="true">→</span></button></aside>
+</div>
+<div class="footnote"><p class="footnote-line"><span class="foot-dim">SUMMONER'S PIT</span><span>1–3 切换 · Enter 入场 · 对战中 1–6 施法</span></p></div>
+</div>
+<dialog class="entry-dialog" id="entry-dialog" aria-labelledby="entry-title"><button class="modal-x" id="entry-close" type="button" aria-label="关闭入场窗口">×</button><form id="entry-form"><p class="overline">ENTER THE ARENA</p><h2 id="entry-title">准备入场</h2><p class="entry-chosen">已选择 <strong id="entry-monster">炎角战魔</strong></p><label for="player-name">召唤师名字</label><input id="player-name" maxlength="18" placeholder="给自己取个名字" autocomplete="nickname" value="召唤师"><button class="summon-btn" id="create-room" type="submit"><span>创建对战房间</span><span aria-hidden="true">→</span></button><div class="entry-divider">或加入朋友的房间</div><label for="room-code">六位房间码</label><div class="join-row"><input id="room-code" maxlength="6" placeholder="例如 A1B2C3" autocomplete="off" spellcheck="false"><button type="button" id="join-room">加入</button></div><p class="note">两台设备打开同一个游戏地址，再用房间码或邀请链接会合。</p></form></dialog>
 </section>
 <section id="room" hidden>
 <div class="room-heading"><div><p class="eyebrow">YOUR PRIVATE ARENA</p><h1>房间 <span id="room-id"></span></h1></div><div class="room-actions"><button id="copy-invite">复制邀请链接</button><button id="leave-room" class="quiet">离开房间</button></div></div>
@@ -24,7 +36,7 @@
 </section>
 <p id="feedback" role="status" aria-live="polite"></p>
 <div class="file-warning" id="file-warning" hidden>请运行 <code>npm start</code> 后打开服务器地址。双击 HTML 无法进行联网对战。</div>
-</main><footer>空绘兽斗 <span>·</span> 同一房间，公平出招。 <span>·</span> 双方生命与技能数值一致，怪兽外观自由选择。</footer>
+</main><footer id="game-footer" hidden>空绘兽斗 <span>·</span> 同一房间，公平出招。 <span>·</span> 双方生命与技能数值一致，怪兽外观自由选择。</footer>
 <script>if(location.protocol==='file:')document.getElementById('file-warning').hidden=false;</script>
 <script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.js"}}</script>
 <script type="module" src="src/main.js"></script>
