@@ -24,6 +24,8 @@
     <!-- 战场：canvas 负责游戏世界，HUD 元素浮在上面 -->
     <div class="stage">
       <canvas id="battle-canvas" width="2000" height="840"></canvas>
+      <!-- 3D 场景状态（加载中 / 失败），由 main-classic.js 更新 -->
+      <p class="scene-note" id="scene-note" role="status">正在加载竞技场与怪兽模型…</p>
 
       <!-- 我方 -->
       <div class="hud hud-tl">
@@ -118,6 +120,7 @@
       document.getElementById('file-warning').classList.add('show');
     }
   </script>
+  <script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.js"}}</script>
   <script type="module" src="src/main-classic.js"></script>
 </body>
 </html>
