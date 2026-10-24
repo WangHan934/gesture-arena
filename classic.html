@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>手势竞技场 · 单机版（塔防 / 决斗）</title>
+  <meta name="description" content="单机版：画手势召唤生物拆塔，或 1v1 决斗走位对拼。不需要联网、不需要对手。" />
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+  <link rel="stylesheet" href="src/ui/style.css" />
+</head>
+<body>
+  <div class="app">
+
+    <header class="topbar">
+      <div class="brand">GESTURE <span>ARENA</span></div>
+      <div class="tagline" id="tagline">画手势 · 召唤生物 · 攻破敌塔</div>
+      <div class="topbar-actions">
+        <button class="mode-chip" id="camera-btn" type="button" title="开启摄像头手势">摄像头</button>
+        <button class="mode-chip" id="switch-mode-btn" type="button">切换模式</button>
+        <a class="mode-chip" href="./index.html" title="回到 3D 怪兽 PvP">3D 对战</a>
+      </div>
+    </header>
+
+    <!-- 战场：canvas 负责游戏世界，HUD 元素浮在上面 -->
+    <div class="stage">
+      <canvas id="battle-canvas" width="2000" height="840"></canvas>
+
+      <!-- 我方 -->
+      <div class="hud hud-tl">
+        <div class="hp-label">
+          <span id="player-hp-label">我方核心</span>
+          <span id="player-hp-text">300 / 300</span>
+        </div>
+        <div class="hp-bar"><i id="player-hp-fill" class="fill-player"></i></div>
+      </div>
+
+      <!-- 敌方 -->
+      <div class="hud hud-tr">
+        <div class="hp-label">
+          <span id="enemy-hp-text">300 / 300</span>
+          <span id="enemy-hp-label">敌方核心</span>
+        </div>
+        <div class="hp-bar"><i id="enemy-hp-fill" class="fill-enemy"></i></div>
+      </div>
+
+      <!-- 提示气泡 -->
+      <div class="toast" id="toast"></div>
+
+      <!-- 结算面板 -->
+      <div class="result" id="result">
+        <div class="result-card">
+          <div class="result-title" id="result-title">胜利</div>
+          <div class="result-detail" id="result-detail"></div>
+          <button class="btn" id="restart-btn">再来一局</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 控制条：资源 + 手势图例 + 画板（放在战场下方，不遮挡画面） -->
+    <div class="controlbar">
+      <div class="mana-panel">
+        <div class="hp-label">
+          <span id="mana-label">法力</span>
+          <span id="mana-text">30 / 100</span>
+        </div>
+        <div class="hp-bar mana-bar"><i id="mana-fill" class="fill-mana"></i></div>
+        <!-- 图例由 main.js 按当前模式动态生成 -->
+        <div class="legend" id="legend"></div>
+        <!-- 摄像头开启后才显示的「比什么手势 = 干什么」 -->
+        <div class="camera-hint" id="camera-hint"></div>
+        <!-- 键盘操作提示，常驻显示（比赛兜底，不靠记） -->
+        <div class="key-hint" id="key-hint"></div>
+      </div>
+
+      <div class="pad" id="pad">
+        <canvas id="gesture-canvas" width="400" height="400"></canvas>
+        <div class="pad-hint">在此画符号</div>
+      </div>
+    </div>
+
+    <!-- 直接双击打开时的提示 -->
+    <div class="file-warning" id="file-warning">
+      <strong>请通过本地服务器打开</strong>
+      <p>
+        双击 index.html 时浏览器会拦截 ES 模块加载。
+        请在项目根目录运行 <code>start.bat</code>（Windows）或 <code>bash start.sh</code>（Mac / Linux）。
+      </p>
+    </div>
+
+  </div>
+
+  <!-- ================= 模式选择 ================= -->
+  <div class="overlay" id="mode-select" aria-hidden="true">
+    <div class="overlay-card">
+      <div class="overlay-head">
+        <h2>选择玩法</h2>
+        <p class="overlay-sub">切换玩法会重开一局</p>
+      </div>
+      <div class="mode-grid" id="mode-grid"></div>
+    </div>
+  </div>
+
+  <!-- ================= 决斗：选怪 ================= -->
+  <div class="overlay" id="duel-select" aria-hidden="true">
+    <div class="overlay-card">
+      <div class="overlay-head">
+        <h2>选择你的生物</h2>
+        <p class="overlay-sub">线条类手势 = 普攻 · 图形类手势 = 技能</p>
+      </div>
+      <div class="roster-grid" id="roster-grid"></div>
+      <button class="btn btn-ghost" id="duel-back-btn" type="button">换个玩法</button>
+    </div>
+  </div>
+
+  <script>
+    // file:// 协议下 ES module 会被浏览器拦截，这里给出明确提示
+    if (location.protocol === 'file:') {
+      document.getElementById('file-warning').classList.add('show');
+    }
+  </script>
+  <script type="module" src="src/main-classic.js"></script>
+</body>
+</html>
