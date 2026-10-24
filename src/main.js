@@ -10,6 +10,7 @@
 import { Renderer } from './ui/renderer.js';
 import { HUD } from './ui/hud.js';
 import { GestureCanvas } from './input/gesture-canvas.js';
+import { CameraInput } from './input/camera-input.js';
 import { drawDuelScene } from './modes/duel-scene.js';
 import {
   MODES,
@@ -38,6 +39,36 @@ const gesture = new GestureCanvas(doc.getElementById('gesture-canvas'), {
     if (!mode || paused) return;
     const out = mode.handleGesture(result);
     if (out?.message) hud.toast(out.message, out.ok ? 'ok' : 'warn');
+  },
+});
+
+/* ---------- 摄像头手势（默认关闭，点按钮才开） ---------- */
+
+const camera = new CameraInput({
+  onPose(pose) {
+    if (!mode || paused) return;
+
+    const action = mode.cameraMap?.[pose];
+    if (!action) return; // 这个姿态在当前模式没有对应动作，静默忽略
+
+    const out = mode.handleCameraAction(action);
+    if (out?.message) hud.toast(out.message, out.ok ? 'ok' : 'warn');
+
+    // 摄像头选了生物 → 关掉选怪浮层、开始对局
+    if (out?.started) startDuelBattle();
+  },
+  onStatus(status) {
+    updateCameraUi(status);
+
+    if (status.state === 'requesting') {
+      hud.toast('正在请求摄像头…', 'info');
+    } else if (status.state === 'ready') {
+      hud.toast('摄像头就绪，对着镜头比手势', 'ok');
+    } else if (status.state === 'error') {
+      // 具体原因（权限被拒 / 被占用 / 没设备）由左下角的摄像头面板显示 + 提供重试，
+      // 气泡只放一句短的，否则长文案会撑破气泡宽度
+      hud.toast('摄像头没开起来，鼠标照常能玩', 'warn');
+    }
   },
 });
 
@@ -84,6 +115,51 @@ function renderLegend(items) {
     if (item.cost != null) {
       row.appendChild(doc.createTextNode(` ${item.cost}`));
     }
+    box.appendChild(row);
+  }
+}
+
+/* ---------- 摄像头 UI ---------- */
+
+/**
+ * 摄像头开关按钮的状态
+ * @param {{state:string, message:string}} status
+ */
+function updateCameraUi(status) {
+  const btn = doc.getElementById('camera-btn');
+  if (!btn) return;
+
+  const on = status.state === 'ready' || status.state === 'requesting';
+  btn.classList.toggle('on', on);
+  // 开启时把游戏整体收窄，给左下角的摄像头画中画让出位置（原因见 style.css 的 --camera-reserve）
+  doc.body.classList.toggle('camera-on', on);
+  btn.textContent = status.state === 'requesting'
+    ? '摄像头…'
+    : on ? '摄像头 开' : '摄像头';
+  btn.title = status.message || '开启摄像头手势';
+}
+
+/**
+ * 摄像头开着的时候，在图例下方显示「比什么手势 = 干什么」。
+ * 关着就整块隐藏，不占地方。
+ */
+function renderCameraHint() {
+  const box = doc.getElementById('camera-hint');
+  if (!box) return;
+
+  const items = camera.active ? (mode?.getCameraHint?.() ?? []) : [];
+  box.innerHTML = '';
+  box.classList.toggle('show', items.length > 0);
+
+  for (const item of items) {
+    const row = doc.createElement('span');
+    row.className = 'camera-hint-item';
+
+    const glyph = doc.createElement('b');
+    glyph.textContent = item.glyph;
+
+    row.appendChild(glyph);
+    row.appendChild(doc.createTextNode(item.label));
     box.appendChild(row);
   }
 }
@@ -174,9 +250,15 @@ function pickMonster(id) {
     hud.toast(res.message ?? '选不了这只生物', 'warn');
     return;
   }
+  startDuelBattle();
+}
+
+/** 生物选定后：关掉选怪浮层、解冻主循环。鼠标点和摄像头选都走这里 */
+function startDuelBattle() {
   hideOverlay('duel-select');
   paused = false;
   hud.hideResult();
+  renderCameraHint(); // 决斗开打后对照表从「选怪」切成「普攻 / 技能」
   hud.toast('决斗开始', 'ok');
 }
 
@@ -195,6 +277,7 @@ function switchMode(id) {
   if (tagline) tagline.textContent = MODES[id].tagline;
 
   renderLegend(mode.getLegend());
+  renderCameraHint();
   hud.hideResult();
   gesture.clear();
   hideOverlay('mode-select');
@@ -244,6 +327,18 @@ doc.getElementById('duel-back-btn').addEventListener('click', () => {
   hideOverlay('duel-select');
   paused = true;
   showOverlay('mode-select');
+});
+
+// 摄像头开关：第一次点才请求权限，失败也只提示，不影响鼠标玩法
+doc.getElementById('camera-btn').addEventListener('click', async () => {
+  const btn = doc.getElementById('camera-btn');
+  btn.disabled = true;
+  try {
+    await camera.toggle();
+  } finally {
+    btn.disabled = false;
+    renderCameraHint();
+  }
 });
 
 /* ---------- 空视图（还没选玩法时） ---------- */

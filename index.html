@@ -14,7 +14,10 @@
     <header class="topbar">
       <div class="brand">GESTURE <span>ARENA</span></div>
       <div class="tagline" id="tagline">画手势 · 召唤生物 · 攻破敌塔</div>
-      <button class="mode-chip" id="switch-mode-btn" type="button">切换模式</button>
+      <div class="topbar-actions">
+        <button class="mode-chip" id="camera-btn" type="button" title="开启摄像头手势">摄像头</button>
+        <button class="mode-chip" id="switch-mode-btn" type="button">切换模式</button>
+      </div>
     </header>
 
     <!-- 战场：canvas 负责游戏世界，HUD 元素浮在上面 -->
@@ -62,6 +65,8 @@
         <div class="hp-bar mana-bar"><i id="mana-fill" class="fill-mana"></i></div>
         <!-- 图例由 main.js 按当前模式动态生成 -->
         <div class="legend" id="legend"></div>
+        <!-- 摄像头开启后才显示的「比什么手势 = 干什么」 -->
+        <div class="camera-hint" id="camera-hint"></div>
       </div>
 
       <div class="pad" id="pad">

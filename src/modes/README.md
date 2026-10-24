@@ -45,6 +45,19 @@ class XxxMode {
 `handleGesture` 返回的 `message` 会被 `main.js` 直接丢进提示气泡，
 所以**必须是人话**（「法力不足（雷鸟 需要 38）」而不是 `reason: 'mana'`）。
 
+### 摄像头手势（可选实现）
+
+如果这个模式要支持摄像头，再加两个成员：
+
+```js
+cameraMap                 // { pose: action }，pose 是 open_palm|fist|one|two|three
+handleCameraAction(a)     // → { ok, message, started? }，started=true 表示"开始了一局"
+getCameraHint()           // → [{ glyph, label }]，摄像头开着时控制条上显示的对照表
+```
+
+`cameraMap` 里没列的姿态会被静默忽略。映射放在模式里而不是输入层，是因为
+模块只认 5 种姿态，而两种玩法要的动作完全不同（塔防是召唤，决斗是出招）。
+
 ---
 
 ## 三、view 模型
