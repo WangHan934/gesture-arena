@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>手势识别 · 模块自检</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121922;
+    --line: rgba(120, 150, 190, .2);
+    --ink: #dbe7f2;
+    --dim: #7c8fa3;
+    --green: #4ade80;
+    --amber: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: radial-gradient(900px 500px at 50% -10%, #14212e 0%, transparent 65%), var(--bg);
+    color: var(--ink);
+    font: 14px/1.6 "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding: 26px clamp(16px, 4vw, 48px) 40px;
+  }
+  header { max-width: 1080px; margin: 0 auto 22px; }
+  h1 { font-size: 19px; margin: 0 0 4px; letter-spacing: .02em; }
+  h1 span { color: var(--dim); font-weight: 400; font-size: 13px; margin-left: 8px; }
+  header p { margin: 0; color: var(--dim); font-size: 13px; }
+
+  main {
+    max-width: 1080px; margin: 0 auto;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+  @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px 18px;
+  }
+  .card.wide { grid-column: 1 / -1; }
+  h2 {
+    font-size: 12px; margin: 0 0 12px; color: var(--dim);
+    letter-spacing: .12em; font-weight: 500; text-transform: uppercase;
+  }
+
+  .pose { font-size: 26px; font-weight: 600; min-height: 40px; }
+  .meta { color: var(--dim); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .bar { height: 4px; background: rgba(255,255,255,.08); border-radius: 99px; margin-top: 12px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--green); transition: width .06s linear; }
+
+  #log { list-style: none; margin: 0; padding: 0; max-height: 210px; overflow: auto; font-size: 12.5px; }
+  #log li {
+    display: flex; gap: 10px; padding: 5px 0; border-bottom: 1px dashed rgba(120,150,190,.12);
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  #log li:first-child { color: var(--green); }
+  #log time { color: var(--dim); flex: none; }
+  #log b { color: var(--amber); font-weight: 500; }
+  #log .empty { color: var(--dim); border: 0; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid rgba(120,150,190,.12); }
+  th { color: var(--dim); font-weight: 500; font-size: 12px; }
+  td code { background: rgba(120,150,190,.12); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+  .tip { color: var(--dim); font-size: 12px; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>手势识别 <span>模块 B · 自检页</span></h1>
+  <p>允许摄像头后把手放进画面。左下角是摄像头画面、手部关键点和识别结果；这里列出模块发出的指令。</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>当前手势</h2>
+    <div class="pose" id="pose">—</div>
+    <div class="meta" id="meta">等待摄像头…</div>
+    <div class="bar"><i id="progress"></i></div>
+  </section>
+
+  <section class="card">
+    <h2>指令流</h2>
+    <ul id="log"><li class="empty">还没有指令。对着摄像头竖起食指并保持 0.3 秒。</li></ul>
+  </section>
+
+  <section class="card wide">
+    <h2>手势对照</h2>
+    <table>
+      <thead><tr><th>手势</th><th>发出的指令</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>🖐 张开手掌</td><td><code>{ type: "CONFIRM" }</code></td><td>确认 / 选定</td></tr>
+        <tr><td>✊ 握拳</td><td><code>{ type: "ATTACK" }</code></td><td>攻击</td></tr>
+        <tr><td>☝ 竖起 1 根手指</td><td><code>{ type: "SELECT_MONSTER", value: 1 }</code></td><td>选择 1 号</td></tr>
+        <tr><td>✌ 竖起 2 根手指</td><td><code>{ type: "SELECT_MONSTER", value: 2 }</code></td><td>选择 2 号</td></tr>
+        <tr><td>🤟 竖起 3 根手指</td><td><code>{ type: "SELECT_MONSTER", value: 3 }</code></td><td>选择 3 号</td></tr>
+      </tbody>
+    </table>
+    <p class="tip">
+      同一手势要保持约 0.3 秒才触发一次；触发后必须换一个手势才能再次触发——所以举着不会连发。
+      笔画 / 遮挡 / 背光会让手指判定跳变，此时换成正面、靠近一点、避开强逆光。
+    </p>
+  </section>
+</main>
+
+<script type="module">
+import { createHandInput, POSE_LABEL } from './src/input/hand/index.js';
+
+const poseEl = document.getElementById('pose');
+const metaEl = document.getElementById('meta');
+const barEl = document.getElementById('progress');
+const logEl = document.getElementById('log');
+
+const hand = createHandInput({ target: window });
+
+/* 每帧刷新"当前手势"，让判定过程看得见 */
+function paint() {
+  const p = hand.pose;
+  poseEl.textContent = hand.handPresent ? (POSE_LABEL[p.pose] || '—') : '把手放进画面';
+  metaEl.textContent = hand.handPresent
+    ? `指 ${p.count} · 开合 ${p.openness.toFixed(2)} · ${hand.tracker.fps} fps`
+    : hand.message;
+  barEl.style.width = `${Math.round((hand.hold || 0) * 100)}%`;
+  requestAnimationFrame(paint);
+}
+requestAnimationFrame(paint);
+
+/* 指令流 */
+let n = 0;
+hand.on('gesture', (ev) => {
+  n++;
+  const empty = logEl.querySelector('.empty');
+  if (empty) empty.remove();
+
+  const li = document.createElement('li');
+  const time = new Date(ev.t).toLocaleTimeString('zh-CN', { hour12: false });
+  li.innerHTML = `<time>${time}</time><span>#${n}</span><b>${ev.type}${ev.value !== undefined ? ' ' + ev.value : ''}</b>`;
+  logEl.prepend(li);
+  while (logEl.children.length > 40) logEl.lastElementChild.remove();
+});
+
+/* 启动 */
+hand.on('status', (s) => {
+  if (s.state === 'error') {
+    poseEl.textContent = '启动失败';
+    metaEl.textContent = s.message;
+  }
+});
+
+hand.start();
+</script>
+</body>
+</html>

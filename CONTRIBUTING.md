@@ -14,9 +14,10 @@
 | B 生物 | `src/summon/` |
 | C 战斗 | `src/battle/` |
 | D 界面 | `src/ui/` |
-| E 整合 | 根目录 + `main.js` + `config.js` + `index.html` |
+| E 整合 | 根目录 + `src/modes/` + `main.js` + `config.js` + `index.html` |
 
-**`main.js` 和 `index.html` 只有 E 改。** 这两个文件是所有模块的交汇点，多人同时改必然冲突。
+**`main.js`、`index.html`、`src/modes/` 只有 E 改。** 这几个是所有模块的交汇点，多人同时改必然冲突。
+`src/modes/` 是玩法适配层（把不同玩法翻译成 `ui/` 认识的统一结构），接口说明见 `src/modes/README.md`。
 
 ---
 
