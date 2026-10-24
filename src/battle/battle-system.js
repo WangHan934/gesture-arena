@@ -58,6 +58,13 @@ export const RULES = {
   playerAttackCooldown: 0.55,
   /** 玩家技能的冷却（秒），不吃速度缩放 —— 技能是"时机"，不是"频率" */
   playerSkillCooldown: 4.0,
+  /**
+   * 开局时技能自带的初始冷却（秒）。
+   * 0 会让高攻单位在第一帧就用 1.8 倍技能直接秒掉脆皮，
+   * 战斗 0 秒结束、对手一次都没出手 —— 体验上是致命的。
+   * 但也不能太长：一局决斗通常 2~4 秒，预热超过这个数技能就永远用不上。
+   */
+  playerSkillInitialCooldown: 1.0,
   /** 技能伤害倍率 */
   playerSkillMultiplier: 1.8,
 
@@ -65,8 +72,12 @@ export const RULES = {
    *  刻意比玩家普攻的 0.55s 慢一倍：玩家有先手和操作优势，但不至于碾压 ——
    *  这样"选哪只怪"和"打不打技能"才真的会影响胜负。 */
   enemyAttackInterval: 1.1,
-  /** 开场宽限：敌人第一次出手前留出的时间，让玩家先熟悉操作 */
-  enemyFirstAttackDelay: 1.8,
+  /**
+   * 开场宽限：敌人第一次出手前留出的时间。
+   * 太长会让高速高攻单位在对手还手前就把人打死（实测 1.8s 时半数对局敌人零出手），
+   * 只要够玩家看清局面、按出第一下就够。
+   */
+  enemyFirstAttackDelay: 0.9,
   /** 敌人每打几次来一次重击 */
   enemyHeavyEvery: 3,
   /** 重击倍率 */
@@ -76,6 +87,13 @@ export const RULES = {
   damageFloor: 1,
   /** 减伤公式的柔化系数：防御 = 该值时伤害减半 */
   defenseSoftCap: 100,
+  /**
+   * 没有 defense 字段时的基础防御。
+   * 现有怪物表只有 hp/dps/speed，默认 0 = 伤害全额生效（保持原行为）。
+   * 想放慢整体节奏、让战斗更有操作空间时，调到 30~50 即可，
+   * 伤害会按 100/(100+防御) 等比下降。
+   */
+  baseDefense: 0,
 
   /** 速度换算基准值：speed = 60 时倍率为 1.0 */
   speedBaseline: 60,
@@ -141,7 +159,7 @@ export function attackIntervalFor(speed, baseInterval, rules = RULES) {
  * 把 B 的怪物数据整形成战斗单位。
  * 只读，不修改传入对象。
  */
-export function toCombatant(def, fallbackName = '未知生物') {
+export function toCombatant(def, fallbackName = '未知生物', rules = RULES) {
   const maxHp = Math.max(1, Math.round(pickNumber(def, ['hp', 'maxHp', 'health'], 100)));
   return {
     id: String(def?.id ?? 'unknown'),
@@ -157,8 +175,10 @@ export function toCombatant(def, fallbackName = '未知生物') {
     // 现有 creature-data 只有 dps，先当攻击力用；
     // 任务书要求的 attack 一旦补齐，会自动优先取 attack。
     attack: Math.max(0, pickNumber(def, ['attack', 'atk', 'dps', 'damage'], 10)),
-    defense: Math.max(0, pickNumber(def, ['defense', 'def', 'armor'], 0)),
-    speed: Math.max(1, pickNumber(def, ['speed'], RULES.speedBaseline)),
+    // 没有 defense 字段时用 baseDefense 兜底：
+    // 防御为 0 会让伤害全额生效，战斗 2 秒内结束、没有操作空间。
+    defense: Math.max(0, pickNumber(def, ['defense', 'def', 'armor'], rules.baseDefense)),
+    speed: Math.max(1, pickNumber(def, ['speed'], rules.speedBaseline)),
   };
 }
 
@@ -293,14 +313,15 @@ export class BattleSystem {
       enemyDef = this._pickOpponent(monsterId);
     }
 
-    this._player = toCombatant(playerDef);
-    this._enemy = toCombatant(enemyDef);
+    this._player = toCombatant(playerDef, '未知生物', this.rules);
+    this._enemy = toCombatant(enemyDef, '未知生物', this.rules);
     this._phase = 'playing';
     this._result = null;
     this._time = 0;
     this._round = 0;
     this._playerCooldown = 0;
-    this._skillCooldown = 0;
+    // 开局技能需要预热，否则高攻单位第一帧就能用 1.8 倍技能秒掉脆皮
+    this._skillCooldown = this.rules.playerSkillInitialCooldown;
     this._enemyTimer = this.rules.enemyFirstAttackDelay;
     this._enemyAttackCount = 0;
     this._log = [];
