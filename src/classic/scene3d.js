@@ -19,12 +19,19 @@
  * 【生物怎么对应模型】
  *   旧玩法有 4 只生物，3D 资源只有 3 只怪兽，所以按体型/气质对应，
  *   巨魔没有独立模型，用岩魔放大来区分。见 MODEL_OF / HEIGHT_OF。
+ *
+ * 【伤害跳字】
+ *   血量变化由渲染层自己比对（不靠玩法层推事件），两种玩法共用一条路径：
+ *     决斗 = 整块伤害，立刻跳；塔防 = dps × dt 的碎伤害，攒 0.25 秒跳一次整数。
+ *   攒的逻辑在 damage-tracker.js，画在 floaters.js 的 2D 覆盖层上。
  */
 
 import * as THREE from 'three';
 import { GLTFLoader } from '../../vendor/three/examples/jsm/loaders/GLTFLoader.js';
 import { clone } from '../../vendor/three/examples/jsm/utils/SkeletonUtils.js';
 import { WORLD } from '../config.js';
+import { DamageTracker } from './damage-tracker.js';
+import { FloatingNumbers } from './floaters.js';
 
 /** 旧生物 id → 3D 模型 id */
 const MODEL_OF = { stone: 'rock', fox: 'fire', bird: 'shadow', brute: 'rock' };
@@ -50,12 +57,21 @@ const TOWER_LANE_SCALE = 1.58;
 /** 决斗里敌人固定在路线的这个位置（0 = 我方端，1 = 敌方端） */
 const DUEL_ENEMY_T = 0.68;
 
+/** 伤害跳字的颜色：打敌人是金色，自己挨打是红色 */
+const DAMAGE_COLOR = { enemy: '#ffe08a', player: '#ff8a8a' };
+
+/** 跳字多大算「大字」：塔防按占血量的比例，决斗按单次伤害值 */
+const BIG_RATIO = 0.06;
+const BIG_DUEL_VALUE = 22;
+
 export class ClassicScene3D {
   /**
    * @param {HTMLCanvasElement} canvas
    * @param {(state:string, message:string) => void} [onStatus]
+   * @param {{fxCanvas?: HTMLCanvasElement | null}} [options]
+   *   fxCanvas = 盖在 3D 画布上的透明层，用来画伤害跳字。不给就只不画跳字
    */
-  constructor(canvas, onStatus = () => {}) {
+  constructor(canvas, onStatus = () => {}, { fxCanvas = null } = {}) {
     this.canvas = canvas;
     this.onStatus = onStatus;
     this.loaded = false;
@@ -63,6 +79,10 @@ export class ClassicScene3D {
     this.kind = null;      // 'tower' | 'duel'
     this.units = new Map(); // key → { key, model, kind, retiring }
     this.templates = {};
+
+    // 伤害跳字：血量变化由 DamageTracker 攒，FloatingNumbers 负责画
+    this.floaters = fxCanvas ? new FloatingNumbers(fxCanvas) : null;
+    this.damage = new DamageTracker();
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#171221');
@@ -158,6 +178,8 @@ export class ClassicScene3D {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    // 覆盖层必须跟着改尺寸，否则跳字会错位
+    this.floaters?.resize();
   }
 
   _frameCamera() {
@@ -173,7 +195,11 @@ export class ClassicScene3D {
    * @param {number} dt
    */
   render(view, dt) {
-    if (!this.loaded || this.lost) return;
+    if (!this.loaded || this.lost) {
+      // 3D 没了就别留着上一帧的字
+      if (this.floaters?.items.length) this.floaters.clear();
+      return;
+    }
 
     const kind = view.mode === 'duel' ? 'duel' : 'tower';
     if (kind !== this.kind) {
@@ -186,7 +212,13 @@ export class ClassicScene3D {
     else this._syncTower(view.world);
 
     this._updateUnits(dt);
+    this._flushDamage(dt);
+
     this.renderer.render(this.scene, this.camera);
+
+    // 投影要用渲染后的相机矩阵，所以放在 render 之后
+    this.floaters?.update(dt);
+    this.floaters?.draw(this.camera);
   }
 
   /* ---------------- 塔防 ---------------- */
@@ -211,6 +243,8 @@ export class ClassicScene3D {
       // 出场时从小到大，别凭空蹦出来
       const pop = creature.spawnAnim ?? 1;
       unit.model.root.scale.setScalar(unit.baseScale * (0.35 + 0.65 * pop));
+
+      this._noteDamage(unit, creature.side, creature.hp, creature.maxHp);
     }
 
     this._retireMissing(seen);
@@ -235,7 +269,16 @@ export class ClassicScene3D {
       const root = new THREE.Group();
       root.add(mesh);
       this.scene.add(root);
-      unit = { key, root, mesh, model: null, kind: 'tower', retiring: 0 };
+      unit = {
+        key,
+        root,
+        mesh,
+        model: null,
+        kind: 'tower',
+        retiring: 0,
+        side: which === 0 ? 'player' : 'enemy',
+        headY: 1.9, // 晶体顶到这里的跳字高度
+      };
       this.units.set(key, unit);
     }
 
@@ -248,6 +291,8 @@ export class ClassicScene3D {
 
     const t = which === 0 ? WORLD.playerTowerX / WORLD.width : WORLD.enemyTowerX / WORLD.width;
     unit.root.position.copy(this._lanePoint(t, TOWER_LANE_SCALE));
+
+    this._noteDamage(unit, unit.side, tower.hp, tower.maxHp);
   }
 
   /* ---------------- 决斗 ---------------- */
@@ -277,6 +322,8 @@ export class ClassicScene3D {
     unit.jitter = 0; // 决斗是正面对峙，不做横向错开
     this._placeAlongLane(unit, t, facing, lunge);
     unit.model.root.scale.setScalar(unit.baseScale);
+
+    this._noteDamage(unit, fighter.side, fighter.hp, fighter.maxHp);
   }
 
   /* ---------------- 摆位 ---------------- */
@@ -327,7 +374,12 @@ export class ClassicScene3D {
 
   _ensureUnit(key, creatureId, role) {
     const existing = this.units.get(key);
-    if (existing) return existing;
+    if (existing) {
+      // 决斗重开时换了一只生物：key 没变但模型要跟着换，
+      // 否则会一直用上一局那只的模型和身高（跳字高度也会错）
+      if (existing.creatureId === creatureId) return existing;
+      this._removeUnit(key);
+    }
 
     const modelId = MODEL_OF[creatureId] ?? 'fire';
     const template = this.templates[modelId];
@@ -338,12 +390,15 @@ export class ClassicScene3D {
 
     const unit = {
       key,
+      creatureId,
       model,
       role,
       root: model.root,
       baseScale: model.root.scale.x,
       jitter: (Math.random() - 0.5) * 2,
       retiring: 0,
+      // 跳字从头顶冒出来，高度用生物的实际身高（巨魔会更高）
+      headY: HEIGHT_OF[creatureId] ?? 2.4,
     };
 
     this.scene.add(model.root);
@@ -424,6 +479,45 @@ export class ClassicScene3D {
     }
   }
 
+  /* ---------------- 伤害跳字 ----------------
+   * 血量变化不靠玩法层推送事件，而是渲染层自己比对：
+   *   决斗 world 里 fighter.hp 是整块减少的，一比对就是一次攻击；
+   *   塔防 creature.hp 是 dps × dt 逐帧减少的，交给 DamageTracker 攒时间片。
+   * 这样两种玩法共用一条代码路径，玩法层一行都不用改。
+   */
+
+  _noteDamage(unit, side, hp, maxHp) {
+    if (!unit || !this.floaters) return;
+    unit.side = side === 'player' ? 'player' : 'enemy';
+
+    const out = this.damage.note(unit.key, hp, maxHp, { instant: this.kind === 'duel' });
+    if (out) this._popDamage(unit, out);
+  }
+
+  _popDamage(unit, { value, ratio }) {
+    const big = this.kind === 'duel' ? value >= BIG_DUEL_VALUE : ratio >= BIG_RATIO;
+    this._spawnFloater(unit, `-${value}`, DAMAGE_COLOR[unit.side] ?? DAMAGE_COLOR.enemy, big);
+  }
+
+  /** 塔防攒够一个时间片的伤害，在这里统一跳出来 */
+  _flushDamage(dt) {
+    if (!this.floaters) return;
+    for (const entry of this.damage.tick(dt)) {
+      const unit = this.units.get(entry.key);
+      if (unit) this._popDamage(unit, entry);
+    }
+  }
+
+  _spawnFloater(unit, text, color, big) {
+    if (!this.floaters) return;
+    const pos = unit.root.position.clone();
+    pos.y += (unit.headY ?? 2.4) * 0.95;
+    // 同一只怪连续挨打时，字别精确叠在一起
+    pos.x += (Math.random() - 0.5) * 0.7;
+    pos.z += (Math.random() - 0.5) * 0.7;
+    this.floaters.spawn(text, pos, { color, big });
+  }
+
   _removeUnit(key) {
     const unit = this.units.get(key);
     if (!unit) return;
@@ -433,10 +527,13 @@ export class ClassicScene3D {
     }
     this.scene.remove(unit.root);
     this.units.delete(key);
+    this.damage.forget(key); // 记录跟着单位一起走，否则打一局会攒下几百条
   }
 
   _clearUnits() {
     for (const key of [...this.units.keys()]) this._removeUnit(key);
+    this.damage.clear();
+    this.floaters?.clear();
   }
 
   destroy() {

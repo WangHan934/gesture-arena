@@ -1057,6 +1057,9 @@ body.selecting > main { max-width:none; padding:0; }
 .summoner .entry-chosen strong { color:var(--accent-2); font-weight:500; margin-left:6px; }
 .summoner .entry-divider { margin:25px 0 0; color:var(--text-faint); font-size:11px; text-align:center; }
 .summoner .entry-dialog .note { color:var(--text-dim); margin-top:16px; font-size:11px; }
+.summoner .solo-entry { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px; padding:13px 16px; border:1px solid var(--line); border-radius:10px; background:rgba(214,181,122,0.05); color:var(--bone); font-size:13px; text-decoration:none; transition:background .18s, border-color .18s; }
+.summoner .solo-entry:hover { background:rgba(214,181,122,0.12); border-color:var(--brass); }
+.summoner .solo-entry span { color:var(--brass); }
 @media(max-width:1180px) {
  .summoner .layout { grid-template-columns:180px minmax(0,1fr) 290px; }
  .summoner .stage { min-height:560px; }

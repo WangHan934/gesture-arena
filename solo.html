@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>人机对战 · 空绘兽斗</title>
+<meta name="description" content="单人模式：选一只怪兽，画符号施法，和定时出手的对手打一场。">
+<link rel="icon" href="assets/selection-sigil.svg">
+<link rel="stylesheet" href="src/ui/pvp.css">
+<link rel="stylesheet" href="src/solo/solo.css">
+</head>
+<body class="solo">
+<header class="topbar">
+  <a class="brand" href="/">空绘<span>兽斗</span><small>SOLO ARENA</small></a>
+  <span class="connection" id="solo-status">人机对战 · 单人</span>
+  <a class="connection" href="classic.html" style="margin-left:18px;text-decoration:none">塔防 / 决斗 →</a>
+</header>
+
+<main>
+<section id="select">
+  <p class="eyebrow">CHOOSE YOUR BEAST</p>
+  <h1>选一只怪兽，进入竞技场</h1>
+  <p class="lead">对手会按固定节奏出手：轻击、轻击、蓄力重击。你画符号施法，把它的血量打空。</p>
+  <div class="model-preview" id="select-preview"><p class="preview-hint" id="preview-hint">正在加载模型…</p></div>
+  <div class="monster-grid" id="solo-roster"></div>
+  <button class="primary" id="solo-start" type="button">进入竞技场 →</button>
+  <p class="note">三只怪兽外观不同，血量与技能完全一致。键盘 1–3 也能切换。</p>
+</section>
+
+<section id="fight" hidden>
+  <div class="battle-top">
+    <div><strong id="fight-label">战斗中</strong><span id="fight-time">0.0 秒</span></div>
+    <strong id="fight-clock">—</strong>
+  </div>
+  <div class="stage" id="stage">
+    <div id="solo-view"></div>
+    <div class="hp-row">
+      <div class="health">
+        <div><b id="self-name">你</b><span id="self-hp"></span></div>
+        <progress id="self-health" max="150" value="150"></progress>
+        <small id="self-buffs"></small>
+      </div>
+      <span class="vs">VS</span>
+      <div class="health enemy">
+        <div><b id="enemy-name">对手</b><span id="enemy-hp"></span></div>
+        <progress id="enemy-health" max="240" value="240"></progress>
+        <small id="enemy-buffs"></small>
+      </div>
+    </div>
+    <p class="telegraph" id="telegraph" hidden>敌方蓄力重击 · 现在开盾能减半</p>
+    <div class="result" id="solo-result" hidden>
+      <h2 id="result-title"></h2>
+      <p id="result-detail"></p>
+      <div class="result-actions">
+        <button class="primary" id="again-btn" type="button">再来一局</button>
+        <button id="reselect-btn" type="button">换一只怪兽</button>
+      </div>
+    </div>
+  </div>
+  <div class="controls">
+    <div class="skills-panel">
+      <p class="eyebrow">DRAW A SPELL · 也可点选技能或按 1–6</p>
+      <div class="spell-grid" id="spells"></div>
+      <ol id="battle-log" aria-live="polite"></ol>
+    </div>
+    <div class="draw-panel">
+      <div class="draw-heading"><strong>施法画板</strong><button id="camera-btn" type="button">开启摄像头</button></div>
+      <div class="pad">
+        <canvas id="gesture-canvas" width="400" height="400" aria-label="拖动画出技能符号"></canvas>
+        <span id="pad-label">按住拖拽，松开施法</span>
+      </div>
+      <p class="note" id="camera-note">鼠标、触屏均可绘制。</p>
+    </div>
+  </div>
+</section>
+</main>
+
+<p id="feedback" role="status" aria-live="polite"></p>
+<script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.js"}}</script>
+<script type="module" src="src/solo/main.js"></script>
+</body></html>

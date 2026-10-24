@@ -147,8 +147,8 @@ export const server = http.createServer(async (req, res) => {
     const pathname = decodeURIComponent(url.pathname);
     const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
     // Serve the game only, never the checkout, private files, or server source.
-    // classic.html 是单机版入口（塔防 / 决斗），和 index.html 并列放在根目录。
-    if (!/^(?:index|classic)\.html$|^(?:src|vendor|assets|art\/renders)\/[^\0]+$/.test(relative) || relative.split('/').some(part => part.startsWith('.'))) return json(res, 404, { message: '文件不存在' });
+    // classic.html 是单机版入口（塔防 / 决斗），solo.html 是人机对战，和 index.html 并列放在根目录。
+    if (!/^(?:index|classic|solo)\.html$|^(?:src|vendor|assets|art\/renders)\/[^\0]+$/.test(relative) || relative.split('/').some(part => part.startsWith('.'))) return json(res, 404, { message: '文件不存在' });
     const file = path.resolve(ROOT, relative);
     if (!file.startsWith(ROOT + path.sep) || !(await stat(file)).isFile()) return json(res, 404, { message: '文件不存在' });
     const bytes = await readFile(file);

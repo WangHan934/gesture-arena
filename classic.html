@@ -17,6 +17,7 @@
       <div class="topbar-actions">
         <button class="mode-chip" id="camera-btn" type="button" title="开启摄像头手势">摄像头</button>
         <button class="mode-chip" id="switch-mode-btn" type="button">切换模式</button>
+        <a class="mode-chip" href="./solo.html" title="人机对战：画符号施法打 AI">人机对战</a>
         <a class="mode-chip" href="./index.html" title="回到 3D 怪兽 PvP">3D 对战</a>
       </div>
     </header>
@@ -24,6 +25,8 @@
     <!-- 战场：canvas 负责游戏世界，HUD 元素浮在上面 -->
     <div class="stage">
       <canvas id="battle-canvas" width="2000" height="840"></canvas>
+      <!-- 伤害跳字的覆盖层：盖在 3D 画面上，由 scene3d.js 投影后绘制 -->
+      <canvas id="fx-canvas" aria-hidden="true"></canvas>
       <!-- 3D 场景状态（加载中 / 失败），由 main-classic.js 更新 -->
       <p class="scene-note" id="scene-note" role="status">正在加载竞技场与怪兽模型…</p>
 

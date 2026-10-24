@@ -229,6 +229,17 @@ body {
   height: 100%;
 }
 
+/* 伤害跳字覆盖层：压在 3D 画面上、HUD 之下。不接鼠标事件 */
+#fx-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
 /* ---------------- HUD 覆盖层 ---------------- */
 
 .hud {

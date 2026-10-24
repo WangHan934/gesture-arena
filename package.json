@@ -6,7 +6,7 @@
   "description": "空绘兽斗：两台设备联网、画符号施法的怪兽 PvP",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node src/battle/battle-system.test.mjs && node tests/gesture.test.mjs && node tests/duel-range.test.mjs && node tests/keyboard.test.mjs && node tests/hand.test.mjs && node --test tests/pvp.test.mjs tests/pvp-network.test.mjs tests/models.test.mjs",
+    "test": "node src/battle/battle-system.test.mjs && node tests/gesture.test.mjs && node tests/duel-range.test.mjs && node tests/keyboard.test.mjs && node tests/hand.test.mjs && node --test tests/pvp.test.mjs tests/pvp-network.test.mjs tests/models.test.mjs tests/damage-number.test.mjs tests/solo.test.mjs",
     "balance": "node src/modes/duel-balance.mjs"
   },
   "engines": {

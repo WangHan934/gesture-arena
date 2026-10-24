@@ -26,12 +26,17 @@ const doc = document;
 
 const hud = new HUD(doc);
 // 3D 竞技场渲染。注意：这块画布不能再取 2D context，否则 WebGL 初始化会失败
-const scene3d = new ClassicScene3D(doc.getElementById('battle-canvas'), (state, message) => {
-  const note = doc.getElementById('scene-note');
-  if (!note) return;
-  note.textContent = message;
-  note.dataset.state = state;
-});
+// fx-canvas 是独立的透明层，专门画伤害跳字（2D），两者互不干扰
+const scene3d = new ClassicScene3D(
+  doc.getElementById('battle-canvas'),
+  (state, message) => {
+    const note = doc.getElementById('scene-note');
+    if (!note) return;
+    note.textContent = message;
+    note.dataset.state = state;
+  },
+  { fxCanvas: doc.getElementById('fx-canvas') },
+);
 scene3d.load().catch((error) => {
   console.error('[3D] 初始化失败', error);
   const note = doc.getElementById('scene-note');
