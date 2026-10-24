@@ -1,0 +1,15 @@
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 日志
+*.log
+
+# AI 协作工具的本地会话数据，不进仓库
+.workbuddy-ai/

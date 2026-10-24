@@ -1,0 +1,438 @@
+/* ==================================================================
+   Gesture Arena · 界面样式
+   配色：深空蓝底 + 我方蓝 / 敌方红 / 法力紫
+   ================================================================== */
+
+:root {
+  --bg-0: #070a14;
+  --bg-1: #17203d;
+  --text: #e8eefc;
+  --text-dim: #8fa3c8;
+  --blue: #5b8cff;
+  --red: #ff5c5c;
+  --purple: #a06bff;
+  --green: #4ade80;
+  --line: rgba(120, 160, 255, 0.22);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 24px;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% -10%, var(--bg-1) 0%, var(--bg-0) 55%);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: auto;
+}
+
+.app {
+  /* 宽度同时受视口宽度和高度约束，保证战场 + 控制条能完整显示 */
+  width: min(1180px, 100%, calc((100vh - 250px) * 2.3809));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ---------------- 顶部标题 ---------------- */
+
+.topbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 4px;
+}
+
+.brand {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 3px;
+}
+
+.brand span {
+  color: var(--blue);
+}
+
+.tagline {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+}
+
+/* ---------------- 战场容器 ---------------- */
+
+.stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1000 / 420;
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px var(--line),
+    0 30px 80px -30px rgba(0, 0, 0, 0.95);
+}
+
+#battle-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---------------- HUD 覆盖层 ---------------- */
+
+.hud {
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.hud-tl {
+  top: 14px;
+  left: 16px;
+}
+
+.hud-tr {
+  top: 14px;
+  right: 16px;
+}
+
+.hp-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+.hud-tr .hp-label {
+  text-align: right;
+}
+
+.hp-bar {
+  width: clamp(130px, 20vw, 210px);
+  height: 8px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.hp-bar > i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 5px;
+  transition: width 0.1s linear;
+}
+
+.fill-player {
+  background: linear-gradient(90deg, #2f9e5f, var(--green));
+  box-shadow: 0 0 10px rgba(74, 222, 128, 0.45);
+}
+
+.fill-enemy {
+  background: linear-gradient(90deg, #b53434, var(--red));
+  box-shadow: 0 0 10px rgba(255, 92, 92, 0.45);
+}
+
+.mana-bar {
+  height: 7px;
+  margin-bottom: 10px;
+}
+
+.fill-mana {
+  background: linear-gradient(90deg, #6b3fd4, var(--purple));
+  box-shadow: 0 0 10px rgba(160, 107, 255, 0.5);
+}
+
+/* 手势图例 */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: rgba(10, 16, 32, 0.6);
+  border: 1px solid rgba(120, 160, 255, 0.16);
+  font-size: 11px;
+  color: #9fb0d0;
+  backdrop-filter: blur(4px);
+}
+
+.legend-item b {
+  font-size: 13px;
+  font-weight: 700;
+  color: #cfe0ff;
+}
+
+/* ---------------- 控制条（法力 + 画板） ---------------- */
+
+.controlbar {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 0 6px;
+}
+
+.mana-panel {
+  flex: 1;
+  min-width: 0;
+  max-width: 430px;
+}
+
+.mana-panel .hp-bar {
+  width: 100%;
+}
+
+/* ---------------- 手势画板 ---------------- */
+
+.pad {
+  position: relative;
+  flex: none;
+  width: clamp(96px, 11vw, 138px);
+  aspect-ratio: 1;
+  border-radius: 14px;
+  background: rgba(10, 16, 32, 0.66);
+  border: 1px solid var(--line);
+  box-shadow: 0 0 0 4px rgba(91, 140, 255, 0.05);
+  backdrop-filter: blur(6px);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.pad:hover {
+  border-color: rgba(120, 160, 255, 0.45);
+  box-shadow: 0 0 0 4px rgba(91, 140, 255, 0.1);
+}
+
+.pad.drawing {
+  border-color: rgba(140, 180, 255, 0.7);
+  box-shadow: 0 0 0 4px rgba(91, 140, 255, 0.16);
+}
+
+.pad.drawing .pad-hint {
+  opacity: 0;
+}
+
+.pad canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+  touch-action: none;
+}
+
+.pad-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: #4d5f80;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+/* ---------------- 提示气泡 ---------------- */
+
+.toast {
+  position: absolute;
+  top: 17%;
+  left: 50%;
+  transform: translate(-50%, -6px);
+  padding: 7px 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  white-space: nowrap;
+  background: rgba(8, 13, 26, 0.92);
+  border: 1px solid var(--line);
+  color: #d6e2ff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 4;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.toast.ok {
+  border-color: rgba(74, 222, 128, 0.5);
+  color: #b9f5cf;
+}
+
+.toast.warn {
+  border-color: rgba(255, 170, 60, 0.55);
+  color: #ffd9a3;
+}
+
+/* ---------------- 结算面板 ---------------- */
+
+.result {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 8, 18, 0.84);
+  backdrop-filter: blur(5px);
+  z-index: 5;
+}
+
+.result.show {
+  display: flex;
+}
+
+.result-card {
+  text-align: center;
+  padding: 32px 48px;
+}
+
+.result-title {
+  font-size: 46px;
+  font-weight: 900;
+  letter-spacing: 10px;
+  margin-bottom: 10px;
+}
+
+.result-title.win {
+  color: #7ff0a8;
+  text-shadow: 0 0 40px rgba(74, 222, 128, 0.55);
+}
+
+.result-title.lose {
+  color: #ff8f8f;
+  text-shadow: 0 0 40px rgba(255, 92, 92, 0.55);
+}
+
+.result-detail {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 24px;
+  letter-spacing: 0.5px;
+}
+
+.btn {
+  padding: 11px 30px;
+  border-radius: 11px;
+  border: 1px solid rgba(120, 160, 255, 0.4);
+  background: linear-gradient(180deg, #2c4da6, #1b3272);
+  color: #dce8ff;
+  font-size: 14px;
+  font-family: inherit;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.2s;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px -8px rgba(91, 140, 255, 0.8);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+/* ---------------- file:// 提示 ---------------- */
+
+.file-warning {
+  display: none;
+  margin-top: 16px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 170, 60, 0.4);
+  background: rgba(60, 40, 10, 0.35);
+  font-size: 13px;
+  line-height: 1.6;
+  color: #ffd9a3;
+}
+
+.file-warning.show {
+  display: block;
+}
+
+.file-warning p {
+  margin: 6px 0 0;
+  color: #d9c39a;
+}
+
+.file-warning code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+}
+
+/* ---------------- 窄屏适配 ---------------- */
+
+@media (max-width: 720px) {
+  body {
+    padding: 12px;
+  }
+
+  .app {
+    width: 100%;
+    gap: 10px;
+  }
+
+  .brand {
+    font-size: 16px;
+    letter-spacing: 2px;
+  }
+
+  .tagline {
+    display: none;
+  }
+
+  .legend-item {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .controlbar {
+    gap: 12px;
+    padding: 0;
+  }
+
+  .pad {
+    width: 96px;
+  }
+
+  .hud-tl {
+    left: 10px;
+  }
+
+  .hud-tr {
+    right: 10px;
+  }
+}
