@@ -11,6 +11,7 @@ import { Renderer } from './ui/renderer.js';
 import { HUD } from './ui/hud.js';
 import { GestureCanvas } from './input/gesture-canvas.js';
 import { CameraInput } from './input/camera-input.js';
+import { KeyboardInput, resolveModeAction, isGlobalKey } from './input/keyboard-input.js';
 import { drawDuelScene } from './modes/duel-scene.js';
 import {
   MODES,
@@ -51,7 +52,7 @@ const camera = new CameraInput({
     const action = mode.cameraMap?.[pose];
     if (!action) return; // 这个姿态在当前模式没有对应动作，静默忽略
 
-    const out = mode.handleCameraAction(action);
+    const out = mode.handleAction(action);
     if (out?.message) hud.toast(out.message, out.ok ? 'ok' : 'warn');
 
     // 摄像头选了生物 → 关掉选怪浮层、开始对局
@@ -72,7 +73,73 @@ const camera = new CameraInput({
   },
 });
 
+/* ---------- 键盘备用控制（比赛兜底） ---------- */
+
+/**
+ * 键盘不是「另一套玩法」，而是和手势走同一条路：
+ * 按键 → 动作 → mode.handleAction()，冷却 / 射程 / 法力判断全部复用。
+ *
+ * 上下文优先级：结果面板 > 玩法选择 > 选怪 > 全局 > 模式动作。
+ * 这样「开始 → 选玩法 → 选怪 → 战斗 → 胜负 → 重开」整条链都能纯键盘走完。
+ */
+const keyboard = new KeyboardInput({
+  onKey(code, event) {
+    // 1. 结算面板：回车 = 再来一局
+    if (isShown('result') && code === 'Enter') {
+      event.preventDefault();
+      doc.getElementById('restart-btn').click();
+      return;
+    }
+
+    // 2. 玩法选择：1 = 塔防，2 = 决斗
+    if (isShown('mode-select')) {
+      if (code === 'Digit1' || code === 'Numpad1') switchMode('tower');
+      else if (code === 'Digit2' || code === 'Numpad2') switchMode('duel');
+      return;
+    }
+
+    // 3. 决斗选怪：1~4 选第几只，Esc 退回玩法选择
+    if (isShown('duel-select')) {
+      const m = /^(?:Digit|Numpad)([1-4])$/.exec(code);
+      if (m) {
+        const unit = mode?.roster?.[Number(m[1]) - 1];
+        if (unit) pickMonster(unit.id);
+        return;
+      }
+      if (code === 'Escape') doc.getElementById('duel-back-btn').click();
+      return;
+    }
+
+    // 4. 全局键
+    if (code === 'Escape') {
+      openModeSelect();
+      return;
+    }
+    if (code === 'KeyC') {
+      doc.getElementById('camera-btn').click();
+      return;
+    }
+    if (isGlobalKey(code)) return;
+
+    // 5. 模式动作
+    if (!mode || paused) return;
+    const action = resolveModeAction(code, mode);
+    if (!action) return;
+
+    event.preventDefault();
+    const out = mode.handleAction(action);
+    if (out?.message) hud.toast(out.message, out.ok ? 'ok' : 'warn');
+    if (out?.started) startDuelBattle();
+    renderKeyHint(); // 阶段可能变了（选怪 → 战斗），提示要跟着换
+  },
+});
+
 /* ---------- 小工具 ---------- */
+
+/** 某个浮层 / 面板是不是正开着 */
+function isShown(id) {
+  return doc.getElementById(id)?.classList.contains('show') ?? false;
+}
 
 function safeStorage() {
   try {
@@ -94,6 +161,13 @@ function hideOverlay(id) {
   if (!el) return;
   el.classList.remove('show');
   el.setAttribute('aria-hidden', 'true');
+}
+
+/** 打开玩法选择浮层。按钮、Esc、选怪返回三处共用，避免漏掉提示刷新 */
+function openModeSelect() {
+  paused = true;
+  showOverlay('mode-select');
+  renderKeyHint();
 }
 
 /** 按当前模式重画控制条上的手势图例 */
@@ -164,6 +238,49 @@ function renderCameraHint() {
   }
 }
 
+/**
+ * 控制条上的键盘提示。
+ * 比赛现场不一定有人记得住键位，所以常驻显示，按当前阶段变化。
+ */
+function renderKeyHint() {
+  const box = doc.getElementById('key-hint');
+  if (!box) return;
+
+  // 提示跟着当前上下文变，不然选玩法时还显示「Z 普攻」会让人困惑
+  let items;
+  if (isShown('mode-select')) {
+    items = [
+      { keys: '1', label: '塔防制' },
+      { keys: '2', label: '1v1 决斗' },
+    ];
+  } else if (isShown('duel-select')) {
+    items = [
+      { keys: '1~4', label: '选生物' },
+      { keys: 'Esc', label: '换个玩法' },
+    ];
+  } else {
+    items = [
+      ...(mode?.getKeyHint?.() ?? []),
+      { keys: 'Enter', label: '再来一局' },
+      { keys: 'Esc', label: '切换玩法' },
+      { keys: 'C', label: '摄像头' },
+    ];
+  }
+
+  box.innerHTML = '';
+  for (const item of items) {
+    const row = doc.createElement('span');
+    row.className = 'key-hint-item';
+
+    const kbd = doc.createElement('kbd');
+    kbd.textContent = item.keys;
+
+    row.appendChild(kbd);
+    row.appendChild(doc.createTextNode(item.label));
+    box.appendChild(row);
+  }
+}
+
 /* ---------- 模式选择界面 ---------- */
 
 function buildModeCards() {
@@ -182,6 +299,12 @@ function buildModeCards() {
     const title = doc.createElement('div');
     title.className = 'mode-card-title';
     title.textContent = def.name;
+
+    // 键盘快捷键角标：比赛现场不用鼠标也能选
+    const keyBadge = doc.createElement('kbd');
+    keyBadge.className = 'mode-card-key';
+    keyBadge.textContent = String(MODE_IDS.indexOf(id) + 1);
+    title.appendChild(keyBadge);
 
     const tag = doc.createElement('div');
     tag.className = 'mode-card-tag';
@@ -213,11 +336,16 @@ function buildRoster() {
     return;
   }
 
-  for (const unit of list) {
+  for (const [index, unit] of list.entries()) {
     const card = doc.createElement('button');
     card.type = 'button';
     card.className = 'roster-card';
     card.style.setProperty('--accent', unit.color);
+
+    // 键盘快捷键角标（摄像头只能选前三只，键盘能选全）
+    const keyBadge = doc.createElement('kbd');
+    keyBadge.className = 'roster-key';
+    keyBadge.textContent = String(index + 1);
 
     const glyph = doc.createElement('div');
     glyph.className = 'roster-glyph';
@@ -231,7 +359,7 @@ function buildRoster() {
     stats.className = 'roster-stats';
     stats.textContent = `血 ${unit.maxHp} · 攻 ${unit.attack} · 速 ${unit.speed}`;
 
-    card.append(glyph, name, stats);
+    card.append(keyBadge, glyph, name, stats);
     card.addEventListener('click', () => pickMonster(unit.id));
     grid.appendChild(card);
   }
@@ -241,6 +369,7 @@ function openDuelSelect() {
   paused = true;
   buildRoster();
   showOverlay('duel-select');
+  renderKeyHint();
 }
 
 function pickMonster(id) {
@@ -259,6 +388,7 @@ function startDuelBattle() {
   paused = false;
   hud.hideResult();
   renderCameraHint(); // 决斗开打后对照表从「选怪」切成「普攻 / 技能」
+  renderKeyHint();    // 键盘提示同理
   hud.toast('决斗开始', 'ok');
 }
 
@@ -281,6 +411,9 @@ function switchMode(id) {
   hud.hideResult();
   gesture.clear();
   hideOverlay('mode-select');
+  // 注意顺序：renderKeyHint 会读「浮层是否还开着」来决定显示哪套提示，
+  // 所以必须放在 hideOverlay 之后，否则会一直停在「1 塔防 / 2 决斗」。
+  renderKeyHint();
 
   if (id === 'duel') {
     openDuelSelect();
@@ -289,6 +422,7 @@ function switchMode(id) {
 
   hideOverlay('duel-select');
   paused = false;
+  renderKeyHint();
   hud.toast('塔防制：画手势召唤生物', 'ok');
 }
 
@@ -311,6 +445,7 @@ doc.getElementById('restart-btn').addEventListener('click', () => {
   const out = mode.restart();
   if (modeId === 'duel') {
     openDuelSelect();
+    renderKeyHint(); // 回到选怪阶段，提示换回「1~4 选生物」
     return;
   }
 
@@ -318,15 +453,11 @@ doc.getElementById('restart-btn').addEventListener('click', () => {
   if (out?.message) hud.toast(out.message, 'ok');
 });
 
-doc.getElementById('switch-mode-btn').addEventListener('click', () => {
-  paused = true;
-  showOverlay('mode-select');
-});
+doc.getElementById('switch-mode-btn').addEventListener('click', openModeSelect);
 
 doc.getElementById('duel-back-btn').addEventListener('click', () => {
   hideOverlay('duel-select');
-  paused = true;
-  showOverlay('mode-select');
+  openModeSelect();
 });
 
 // 摄像头开关：第一次点才请求权限，失败也只提示，不影响鼠标玩法
@@ -395,5 +526,6 @@ if (initial) {
 } else {
   showOverlay('mode-select');
 }
+renderKeyHint();
 
 requestAnimationFrame(frame);

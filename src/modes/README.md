@@ -45,18 +45,26 @@ class XxxMode {
 `handleGesture` 返回的 `message` 会被 `main.js` 直接丢进提示气泡，
 所以**必须是人话**（「法力不足（雷鸟 需要 38）」而不是 `reason: 'mana'`）。
 
-### 摄像头手势（可选实现）
+### 摄像头 / 键盘（可选实现）
 
-如果这个模式要支持摄像头，再加两个成员：
+摄像头和键盘共用**同一套动作词表**，都走 `handleAction()`：
 
 ```js
 cameraMap                 // { pose: action }，pose 是 open_palm|fist|one|two|three
-handleCameraAction(a)     // → { ok, message, started? }，started=true 表示"开始了一局"
-getCameraHint()           // → [{ glyph, label }]，摄像头开着时控制条上显示的对照表
+keyMap                    // { KeyboardEvent.code: action }
+handleAction(a)           // → { ok, message, started? }，started=true 表示"开始了一局"
+getCameraHint()           // → [{ glyph, label }]，摄像头开着时显示的对照表
+getKeyHint()              // → [{ keys, label }]，控制条上常驻的键盘提示
 ```
 
-`cameraMap` 里没列的姿态会被静默忽略。映射放在模式里而不是输入层，是因为
-模块只认 5 种姿态，而两种玩法要的动作完全不同（塔防是召唤，决斗是出招）。
+动作词表：`creature:N` / `monster:N` / `attack` / `skill` / `toward` / `away`。
+
+**关键约束：键盘不要直接调战斗引擎。** 按键应该合成一个动作交给 `handleAction()`，
+让它复用冷却、射程、法力判断。否则会出现「键盘能无限召唤 / 绕过冷却」这种两套逻辑各写一遍的 bug。
+`tests/keyboard.test.mjs` 专门验了这条。
+
+`cameraMap` / `keyMap` 里没列的键会被静默忽略。映射放在模式里而不是输入层，是因为
+模块只认 5 种姿态、键盘键位也和玩法强相关，放进输入层会让输入层认识所有玩法。
 
 ---
 

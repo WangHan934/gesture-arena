@@ -37,6 +37,21 @@ export class TowerMode {
       fist: 'creature:3',
     };
 
+    /**
+     * 键盘 → 动作。动作词表和 cameraMap 完全一致，走同一个 handleAction()。
+     * 数字键 1~4 对应四只生物，比赛时不用画图形也能召唤。
+     */
+    this.keyMap = {
+      Digit1: 'creature:0',
+      Digit2: 'creature:1',
+      Digit3: 'creature:2',
+      Digit4: 'creature:3',
+      Numpad1: 'creature:0',
+      Numpad2: 'creature:1',
+      Numpad3: 'creature:2',
+      Numpad4: 'creature:3',
+    };
+
     this.battle = new Battle();
     this.summoner = new Summoner(this.battle);
   }
@@ -63,11 +78,11 @@ export class TowerMode {
   }
 
   /**
-   * 处理一个摄像头动作（来自 cameraMap）
+   * 处理一个抽象动作。摄像头和键盘共用这一个入口。
    * @param {string} action 形如 'creature:0'
    * @returns {{ok:boolean, message:string}}
    */
-  handleCameraAction(action) {
+  handleAction(action) {
     if (typeof action !== 'string' || !action.startsWith('creature:')) {
       return { ok: false, message: '这个手势在塔防模式用不上' };
     }
@@ -81,12 +96,22 @@ export class TowerMode {
     return { ok: out.ok, message: out.message };
   }
 
+  /** @deprecated 用 handleAction()。保留别名是为了不破坏已有的摄像头调用。 */
+  handleCameraAction(action) {
+    return this.handleAction(action);
+  }
+
   /** 摄像头开启时控制条上显示的对照表 */
   getCameraHint() {
     return CREATURES.map((c, i) => ({
       glyph: ['☝', '✌', '🤟', '✊'][i] ?? '?',
       label: c.name,
     }));
+  }
+
+  /** 控制条上显示的键盘提示 */
+  getKeyHint() {
+    return [{ keys: '1~4', label: '召唤' }];
   }
 
   /** 控制条上的手势图例 */
