@@ -1,0 +1,65 @@
+{
+  "source": "art/blender/AISummoner_Monsters_Arena_v2_FireAnim.blend",
+  "user_mesh_geometry_matches": {
+    "ShadowMonster_Tails": true,
+    "ShadowMonster_Mane": true,
+    "ShadowMonster_Leg_R": true,
+    "ShadowMonster_Leg_L": true,
+    "ShadowMonster_Horns": true,
+    "ShadowMonster_Head": true,
+    "ShadowMonster_Hand_R": true,
+    "ShadowMonster_Hand_L": true,
+    "ShadowMonster_Body": true,
+    "ShadowMonster_Arm_R": true,
+    "ShadowMonster_Arm_L": true,
+    "RockMonster_Tail": true,
+    "RockMonster_Shell": true,
+    "RockMonster_Leg_R": true,
+    "RockMonster_Leg_L": true,
+    "RockMonster_Horns": true,
+    "RockMonster_Head": true,
+    "RockMonster_Hand_R": true,
+    "RockMonster_Hand_L": true,
+    "RockMonster_Body": true,
+    "RockMonster_Arm_R": true,
+    "RockMonster_Arm_L": true,
+    "FireMonster_Tail": true,
+    "FireMonster_Mane": true,
+    "FireMonster_Leg_R": true,
+    "FireMonster_Leg_L": true,
+    "FireMonster_Horns": true,
+    "FireMonster_Head": true,
+    "FireMonster_Hand_R": true,
+    "FireMonster_Hand_L": true,
+    "FireMonster_Body": true,
+    "FireMonster_BackArmor": true,
+    "FireMonster_Arm_R": true,
+    "FireMonster_Arm_L": true
+  },
+  "models": {
+    "fire.glb": {
+      "collection": "FireMonster",
+      "objects": 13,
+      "bytes": 1285964,
+      "sha256": "46fa71d2587750aca54c4a5dfd98da0b12659b47f263d3e60045c46b6bbae375"
+    },
+    "shadow.glb": {
+      "collection": "ShadowMonster",
+      "objects": 11,
+      "bytes": 384780,
+      "sha256": "ab85e712b16f5b4024d068c73ab985bca707c0313cf0a2a400775d1d02eb8155"
+    },
+    "rock.glb": {
+      "collection": "RockMonster",
+      "objects": 11,
+      "bytes": 397304,
+      "sha256": "bfdd56375f0b32688094c1e9376b206ba5f4ac9c5f53df41a68d1376a97611b7"
+    },
+    "arena.glb": {
+      "collection": "Arena",
+      "objects": 22,
+      "bytes": 784948,
+      "sha256": "b69da932674201746e1ad3b098879363244b401ab0ffe9fccede41429973be25"
+    }
+  }
+}

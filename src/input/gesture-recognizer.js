@@ -256,6 +256,10 @@ function scoreAgainst(candidate, tpl) {
  * @returns {{id:string, score:number} | null} 识别结果，null 表示没认出来
  */
 export function recognize(points) {
+  return recognizeFrom(points, TEMPLATES, GESTURE.matchThreshold);
+}
+
+function recognizeFrom(points, templates, threshold) {
   if (!Array.isArray(points) || points.length < 4) return null;
   if (pathLength(points) < GESTURE.minPathLength) return null;
 
@@ -263,7 +267,7 @@ export function recognize(points) {
   const linearity = linearityOf(points);
 
   let best = null;
-  for (const tpl of TEMPLATES) {
+  for (const tpl of templates) {
     // 形状门槛：线性度不符合的模板直接跳过
     if (linearity < tpl.minLinearity || linearity > tpl.maxLinearity) continue;
 
@@ -274,7 +278,7 @@ export function recognize(points) {
   }
 
   if (!best) return null;
-  if (best.score > GESTURE.matchThreshold) return null;
+  if (best.score > threshold) return null;
   if (!best.valid) return null; // 撞上负样本，直接判无效
 
   const result = { id: best.id, score: best.score };
@@ -289,6 +293,22 @@ export function recognize(points) {
   }
 
   return result;
+}
+
+const SPELL_TEMPLATES = [
+  makeTemplate('circle', circlePoints(), { closed: true, minLinearity: 2.2 }),
+  makeTemplate('line_h', horizontalLine(), { maxLinearity: 1.45 }),
+  makeTemplate('line_v', verticalLine(), { maxLinearity: 1.45 }),
+  makeTemplate('triangle', [{x:100,y:0},{x:200,y:180},{x:0,y:180},{x:100,y:0}], { closed: true, minLinearity: 2.2 }),
+  makeTemplate('square', [{x:0,y:0},{x:200,y:0},{x:200,y:200},{x:0,y:200},{x:0,y:0}], { closed: true, minLinearity: 2.2 }),
+  makeTemplate('two', [{x:0,y:35},{x:35,y:0},{x:135,y:0},{x:180,y:35},{x:180,y:75},{x:0,y:200},{x:200,y:200}]),
+  makeTemplate('_diag_down', diagonalDown(), {valid:false}),
+  makeTemplate('_diag_up', diagonalUp(), {valid:false}),
+];
+
+/** PvP has its own vocabulary; the original tower/duel recognizer is unchanged. */
+export function recognizeSpell(points) {
+  return recognizeFrom(points, SPELL_TEMPLATES, 0.23);
 }
 
 /** 给 UI 用的手势图例 */

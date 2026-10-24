@@ -44,6 +44,12 @@ export class CameraInput {
     return this._status;
   }
 
+  getFrame(now) {
+    if (this._status.state !== 'ready' || !this.hand) return null;
+    const detection = this.hand.tracker.read(now);
+    return detection ? { ...detection, pose: this.hand.pose.pose } : null;
+  }
+
   /**
    * 开启摄像头。第一次调用才创建模块实例（避免一进游戏就下载 26MB 模型）。
    * 失败不抛错，只把原因写进状态。

@@ -1,122 +1,31 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Gesture Arena · 手势竞技场</title>
-  <meta name="description" content="用手势召唤生物、出招对战的网页游戏。塔防制与 1v1 决斗两种玩法。" />
-  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
-  <link rel="stylesheet" href="src/ui/style.css" />
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>空绘兽斗 · 怪兽 PvP</title>
+<meta name="description" content="两台设备，同一间竞技场。画符号施法的实时怪兽 PvP。">
+<link rel="icon" href="assets/favicon.svg"><link rel="stylesheet" href="src/ui/pvp.css">
 </head>
 <body>
-  <div class="app">
-
-    <header class="topbar">
-      <div class="brand">GESTURE <span>ARENA</span></div>
-      <div class="tagline" id="tagline">画手势 · 召唤生物 · 攻破敌塔</div>
-      <div class="topbar-actions">
-        <button class="mode-chip" id="camera-btn" type="button" title="开启摄像头手势">摄像头</button>
-        <button class="mode-chip" id="switch-mode-btn" type="button">切换模式</button>
-      </div>
-    </header>
-
-    <!-- 战场：canvas 负责游戏世界，HUD 元素浮在上面 -->
-    <div class="stage">
-      <canvas id="battle-canvas" width="2000" height="840"></canvas>
-
-      <!-- 我方 -->
-      <div class="hud hud-tl">
-        <div class="hp-label">
-          <span id="player-hp-label">我方核心</span>
-          <span id="player-hp-text">300 / 300</span>
-        </div>
-        <div class="hp-bar"><i id="player-hp-fill" class="fill-player"></i></div>
-      </div>
-
-      <!-- 敌方 -->
-      <div class="hud hud-tr">
-        <div class="hp-label">
-          <span id="enemy-hp-text">300 / 300</span>
-          <span id="enemy-hp-label">敌方核心</span>
-        </div>
-        <div class="hp-bar"><i id="enemy-hp-fill" class="fill-enemy"></i></div>
-      </div>
-
-      <!-- 提示气泡 -->
-      <div class="toast" id="toast"></div>
-
-      <!-- 结算面板 -->
-      <div class="result" id="result">
-        <div class="result-card">
-          <div class="result-title" id="result-title">胜利</div>
-          <div class="result-detail" id="result-detail"></div>
-          <button class="btn" id="restart-btn">再来一局</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 控制条：资源 + 手势图例 + 画板（放在战场下方，不遮挡画面） -->
-    <div class="controlbar">
-      <div class="mana-panel">
-        <div class="hp-label">
-          <span id="mana-label">法力</span>
-          <span id="mana-text">30 / 100</span>
-        </div>
-        <div class="hp-bar mana-bar"><i id="mana-fill" class="fill-mana"></i></div>
-        <!-- 图例由 main.js 按当前模式动态生成 -->
-        <div class="legend" id="legend"></div>
-        <!-- 摄像头开启后才显示的「比什么手势 = 干什么」 -->
-        <div class="camera-hint" id="camera-hint"></div>
-        <!-- 键盘操作提示，常驻显示（比赛兜底，不靠记） -->
-        <div class="key-hint" id="key-hint"></div>
-      </div>
-
-      <div class="pad" id="pad">
-        <canvas id="gesture-canvas" width="400" height="400"></canvas>
-        <div class="pad-hint">在此画符号</div>
-      </div>
-    </div>
-
-    <!-- 直接双击打开时的提示 -->
-    <div class="file-warning" id="file-warning">
-      <strong>请通过本地服务器打开</strong>
-      <p>
-        双击 index.html 时浏览器会拦截 ES 模块加载。
-        请在项目根目录运行 <code>start.bat</code>（Windows）或 <code>bash start.sh</code>（Mac / Linux）。
-      </p>
-    </div>
-
-  </div>
-
-  <!-- ================= 模式选择 ================= -->
-  <div class="overlay" id="mode-select" aria-hidden="true">
-    <div class="overlay-card">
-      <div class="overlay-head">
-        <h2>选择玩法</h2>
-        <p class="overlay-sub">切换玩法会重开一局</p>
-      </div>
-      <div class="mode-grid" id="mode-grid"></div>
-    </div>
-  </div>
-
-  <!-- ================= 决斗：选怪 ================= -->
-  <div class="overlay" id="duel-select" aria-hidden="true">
-    <div class="overlay-card">
-      <div class="overlay-head">
-        <h2>选择你的生物</h2>
-        <p class="overlay-sub">线条类手势 = 普攻 · 图形类手势 = 技能</p>
-      </div>
-      <div class="roster-grid" id="roster-grid"></div>
-      <button class="btn btn-ghost" id="duel-back-btn" type="button">换个玩法</button>
-    </div>
-  </div>
-
-  <script>
-    // file:// 协议下 ES module 会被浏览器拦截，这里给出明确提示
-    if (location.protocol === 'file:') {
-      document.getElementById('file-warning').classList.add('show');
-    }
-  </script>
-  <script type="module" src="src/main.js"></script>
-</body>
-</html>
+<header class="topbar"><a class="brand" href="/">空绘<span>兽斗</span><small>GESTURE ARENA</small></a><span class="connection" id="connection">双人联网 · 回合对战</span></header>
+<main>
+<section id="home" class="home">
+<div class="intro"><p class="eyebrow">DRAW YOUR POWER / 01</p><h1>一笔施法。<br><em>与真人怪兽对决。</em></h1><p class="lead">两台设备加入同一个房间，召唤你的怪兽。画出六种符号，决定这一回合的攻守。</p><div class="facts"><span>2 位玩家</span><span>6 种技能</span><span>45 秒 / 回合</span></div><div id="model-preview" class="model-preview"><canvas id="battle-canvas" class="model-canvas" aria-label="三个原始 3D 怪兽和竞技场"></canvas></div><p id="model-status" class="note" role="status">正在初始化 3D 场景…</p></div>
+<form class="panel" id="entry-form"><p class="eyebrow">ENTER THE ARENA</p><h2>准备入场</h2><label for="player-name">召唤师名字</label><input id="player-name" maxlength="18" placeholder="给自己取个名字" autocomplete="nickname" value="召唤师"><label>选择你的怪兽</label><div class="monster-grid" id="home-roster"></div><button class="primary" id="create-room" type="submit">创建对战房间 <span>→</span></button><div class="divider">或者加入朋友的房间</div><label for="room-code">六位房间码</label><div class="join-row"><input id="room-code" maxlength="6" placeholder="例如 A1B2C3" autocomplete="off" spellcheck="false"><button type="button" id="join-room">加入</button></div><p class="note">两台设备需打开同一个服务器地址。同一 Wi-Fi 可使用服务端显示的局域网地址；跨网络需要部署服务端。</p></form>
+</section>
+<section id="room" hidden>
+<div class="room-heading"><div><p class="eyebrow">YOUR PRIVATE ARENA</p><h1>房间 <span id="room-id"></span></h1></div><div class="room-actions"><button id="copy-invite">复制邀请链接</button><button id="leave-room" class="quiet">离开房间</button></div></div>
+<div id="lobby" class="panel"><h2>双方准备后，随机决定先手</h2><div class="players" id="lobby-players"></div><div id="lobby-preview" class="model-preview"></div><div class="monster-grid" id="room-roster"></div><button class="primary" id="ready-btn">锁定怪兽，准备对战</button><p class="note" id="lobby-note">把邀请链接发给朋友，或让朋友输入房间码。</p></div>
+<div id="battle" hidden>
+<div class="battle-top"><div><strong id="turn-label">等待对战</strong><span id="turn-count"></span></div><strong id="clock">45s</strong></div>
+<div class="stage"><div id="battle-view"></div><div class="hp-row"><div class="health"><div><b id="self-name"></b><span id="self-hp"></span></div><progress id="self-health" max="140"></progress><small id="self-buffs"></small></div><span class="vs">VS</span><div class="health enemy"><div><b id="enemy-name"></b><span id="enemy-hp"></span></div><progress id="enemy-health" max="140"></progress><small id="enemy-buffs"></small></div></div><div class="result" id="result" hidden><h2 id="result-title"></h2><p id="result-detail"></p><button class="primary" id="rematch-btn">再战一局</button></div></div>
+<div class="controls"><div class="skills-panel"><p class="eyebrow">DRAW A SPELL · 也可点选技能或按 1–6</p><div class="spell-grid" id="spells"></div><p class="note">护盾抵挡下一次伤害；援军强化下一次攻击。技能冷却按自己的回合计算。</p><ol id="battle-log" aria-live="polite"></ol></div><div class="draw-panel"><div class="draw-heading"><strong>施法画板</strong><button id="camera-btn" type="button">开启摄像头</button></div><div class="pad"><canvas id="gesture-canvas" width="400" height="400" aria-label="拖动画出技能符号"></canvas><span id="pad-label">按住拖拽，松开施法</span></div><p class="note" id="camera-note">鼠标、触屏均可绘制。</p></div></div>
+</div>
+</section>
+<p id="feedback" role="status" aria-live="polite"></p>
+<div class="file-warning" id="file-warning" hidden>请运行 <code>npm start</code> 后打开服务器地址。双击 HTML 无法进行联网对战。</div>
+</main><footer>空绘兽斗 <span>·</span> 同一房间，公平出招。 <span>·</span> 双方生命与技能数值一致，怪兽外观自由选择。</footer>
+<script>if(location.protocol==='file:')document.getElementById('file-warning').hidden=false;</script>
+<script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.js"}}</script>
+<script type="module" src="src/main.js"></script>
+</body></html>
