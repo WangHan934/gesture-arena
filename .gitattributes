@@ -7,3 +7,7 @@
 # Windows 批处理必须是 CRLF
 *.bat text eol=crlf
 *.cmd text eol=crlf
+
+# Keep official vendored source byte-for-byte; binary model derivatives.
+vendor/three/** -whitespace
+*.glb binary
