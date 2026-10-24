@@ -163,6 +163,46 @@ body {
   color: #d8f5e4;
 }
 
+/* ---------------- 键盘操作提示 ---------------- */
+
+.key-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(120, 160, 255, 0.18);
+}
+
+.key-hint-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(16, 24, 44, 0.6);
+  border: 1px solid rgba(120, 160, 255, 0.14);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  color: #93a6c4;
+}
+
+.key-hint-item kbd {
+  display: inline-block;
+  min-width: 16px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(120, 160, 255, 0.14);
+  border: 1px solid rgba(120, 160, 255, 0.28);
+  border-bottom-width: 2px;
+  color: #cfe0ff;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+
 /* 窄屏收窄游戏会让画面太小，这里取消让位，面板允许叠在画面上（它有收起按钮） */
 @media (max-width: 1100px) {
   body.camera-on {
@@ -722,4 +762,38 @@ body {
     padding: 4px 10px;
     font-size: 10px;
   }
+}
+
+/* ---------------- 卡片上的键盘角标 ---------------- */
+
+.mode-card-key,
+.roster-key {
+  display: inline-block;
+  min-width: 17px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(120, 160, 255, 0.16);
+  border: 1px solid rgba(120, 160, 255, 0.32);
+  border-bottom-width: 2px;
+  color: #cfe0ff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.mode-card-key {
+  margin-left: 8px;
+  vertical-align: 2px;
+}
+
+.roster-card {
+  position: relative;
+}
+
+.roster-key {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0.75;
 }

@@ -76,6 +76,26 @@ export class DuelMode {
       open_palm: 'skill',
     };
 
+    /**
+     * 键盘 → 动作。动作词表和 cameraMap 一致，走同一个 handleAction()。
+     * 关键作用：摄像头只输出 1/2/3 根手指，选不到第 4 只生物；
+     * 键盘 1~4 能选全，比赛现场用它兜底。
+     */
+    this.keyMap = {
+      Digit1: 'monster:0',
+      Digit2: 'monster:1',
+      Digit3: 'monster:2',
+      Digit4: 'monster:3',
+      Numpad1: 'monster:0',
+      Numpad2: 'monster:1',
+      Numpad3: 'monster:2',
+      Numpad4: 'monster:3',
+      KeyZ: 'attack',
+      KeyV: 'skill',
+      ArrowLeft: 'away',
+      ArrowRight: 'toward',
+    };
+
     // 决斗专用生物表。注意必须同时传 getMonster：
     // battle-system 在没有 getMonster 时会优先用上游的 getCreatureById，
     // 那样查到的还是原始数值，DUEL_STATS 会被静默忽略（踩过这个坑）。
@@ -215,15 +235,23 @@ export class DuelMode {
    * @param {string} action 形如 'monster:0' / 'attack' / 'skill'
    * @returns {{ok:boolean, message:string, started?:boolean}}
    */
-  handleCameraAction(action) {
+  handleAction(action) {
     if (typeof action !== 'string') {
       return { ok: false, message: '这个手势在决斗模式用不上' };
+    }
+
+    // 显式的走位动作（键盘 ← →）
+    if (action === 'toward' || action === 'away') {
+      if (this._phase !== 'playing') {
+        return { ok: false, message: this._phase === 'select' ? '先选一只生物' : '本局已结束' };
+      }
+      return this._move(action);
     }
 
     if (action.startsWith('monster:')) {
       const index = Number(action.slice('monster:'.length));
 
-      // 选怪阶段：手指数量 = 选第几只
+      // 选怪阶段：手指数量 / 数字键 = 选第几只
       if (this._phase === 'select') {
         const unit = this.roster[index];
         if (!unit) return { ok: false, message: '没有这只生物' };
@@ -248,13 +276,18 @@ export class DuelMode {
     // 战斗中：复用 handleGesture，冷却和射程逻辑只写一份
     if (action === 'attack' || action === 'skill') {
       if (this._phase === 'select') {
-        return { ok: false, message: '先比出手指选一只生物' };
+        return { ok: false, message: '先选一只生物' };
       }
       // 注意：普攻对应的是折线，横线现在是走位
       return this.handleGesture({ id: action === 'attack' ? 'zigzag' : 'v_shape', score: 0 });
     }
 
     return { ok: false, message: '这个手势在决斗模式用不上' };
+  }
+
+  /** @deprecated 用 handleAction()。保留别名是为了不破坏已有的摄像头调用。 */
+  handleCameraAction(action) {
+    return this.handleAction(action);
   }
 
   /**
@@ -274,6 +307,18 @@ export class DuelMode {
       { glyph: '✌', label: '拉开' },
       { glyph: '✊', label: '普攻' },
       { glyph: '🖐', label: '技能' },
+    ];
+  }
+
+  /** 控制条上显示的键盘提示（按阶段变化） */
+  getKeyHint() {
+    if (this._phase === 'select') {
+      return [{ keys: '1~4', label: '选生物' }];
+    }
+    return [
+      { keys: 'Z', label: '普攻' },
+      { keys: 'V', label: '技能' },
+      { keys: '← →', label: '走位' },
     ];
   }
 
