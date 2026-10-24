@@ -420,6 +420,7 @@ export class DuelMode {
   /** 把战斗单位整理成渲染器要的形状 */
   _fighter(unit, x, side) {
     return {
+      id: unit.id,
       name: unit.name,
       glyph: unit.glyph,
       color: unit.color,

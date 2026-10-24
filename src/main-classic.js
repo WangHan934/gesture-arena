@@ -7,12 +7,11 @@
  * 不含任何游戏规则。要改玩法去 src/modes/，改数值去 config.js。
  */
 
-import { Renderer } from './ui/renderer.js';
+import { ClassicScene3D } from './classic/scene3d.js';
 import { HUD } from './ui/hud.js';
 import { GestureCanvas } from './input/gesture-canvas.js';
 import { CameraInput } from './input/camera-input.js';
 import { KeyboardInput, resolveModeAction, isGlobalKey } from './input/keyboard-input.js';
-import { drawDuelScene } from './modes/duel-scene.js';
 import {
   MODES,
   MODE_IDS,
@@ -26,7 +25,21 @@ const doc = document;
 /* ---------- 组装 ---------- */
 
 const hud = new HUD(doc);
-const renderer = new Renderer(doc.getElementById('battle-canvas'));
+// 3D 竞技场渲染。注意：这块画布不能再取 2D context，否则 WebGL 初始化会失败
+const scene3d = new ClassicScene3D(doc.getElementById('battle-canvas'), (state, message) => {
+  const note = doc.getElementById('scene-note');
+  if (!note) return;
+  note.textContent = message;
+  note.dataset.state = state;
+});
+scene3d.load().catch((error) => {
+  console.error('[3D] 初始化失败', error);
+  const note = doc.getElementById('scene-note');
+  if (note) {
+    note.textContent = '3D 场景加载失败，画板和键盘仍可用。';
+    note.dataset.state = 'error';
+  }
+});
 
 /** 当前模式实例；null = 还没选玩法 */
 let mode = null;
@@ -503,12 +516,7 @@ function frame(now) {
 
   const view = mode ? mode.getView() : EMPTY_VIEW;
 
-  renderer.clear();
-  if (view.mode === 'duel') {
-    drawDuelScene(renderer.ctx, view.world, now / 1000, renderer.stars);
-  } else {
-    renderer.renderTower(view.world);
-  }
+  scene3d.render(view, dt);
 
   gesture.render();
   hud.update(view);

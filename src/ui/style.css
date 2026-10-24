@@ -797,3 +797,35 @@ body {
   right: 8px;
   opacity: 0.75;
 }
+
+/* ---------------- 3D 场景状态提示 ---------------- */
+
+.scene-note {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 4px 12px;
+  border-radius: 99px;
+  background: rgba(10, 14, 26, 0.72);
+  border: 1px solid rgba(120, 160, 255, 0.2);
+  color: #9fb2d4;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 6;
+  transition: opacity 0.5s ease;
+}
+
+/* 加载完就淡出，别一直挡着画面 */
+.scene-note[data-state="ready"] {
+  opacity: 0;
+}
+
+.scene-note[data-state="error"] {
+  color: #ffb4a0;
+  border-color: rgba(255, 140, 110, 0.42);
+  background: rgba(40, 12, 10, 0.78);
+}
