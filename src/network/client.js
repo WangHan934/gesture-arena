@@ -5,10 +5,9 @@ export class RoomClient {
   }
   /**
    * 身份怎么带。三种都发，因为线上网关会吃掉 Authorization：
-   *   · Authorization  —— 本地直连和服务端语义上的标准做法
-   *   · X-Ga-Token     —— 网关照常透传的自定义头
-   *   · ?token=        —— 前两个都被剥掉时的兜底
-   * 服务端 member() 三个都认，谁先到用谁。
+   *   · 路径最后一段 /action/<token> —— 实测唯一确定能透传的通道
+   *   · Authorization / X-Ga-Token  —— 本地直连和常规网关下的标准做法
+   * 服务端 member() 三种都认，按可靠程度取。
    */
   authHeaders() {
     const token = this.session?.token;
@@ -16,8 +15,7 @@ export class RoomClient {
   }
   withToken(path) {
     const token = this.session?.token;
-    if (!token) return path;
-    return `${path}${path.includes('?') ? '&' : '?'}token=${token}`;
+    return token ? `${path}/${token}` : path;
   }
   async request(path, data) {
     const response = await fetch(this.withToken(path), {

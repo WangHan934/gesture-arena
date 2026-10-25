@@ -36,15 +36,19 @@ function broadcast(room) {
  *
  * 为什么不止读 Authorization：线上部署时前面有一层网关，
  * 它会把 Authorization 头吃掉，导致建房成功但后续请求全部 401。
- * 所以另外接受两种携带方式（客户端三种都会发）：
- *   · X-Ga-Token 头
- *   · ?token= 查询参数
- * 本地直连时 Authorization 仍然优先，行为不变。
+ * 所以按可靠程度依次尝试四种携带方式（客户端全都会发）：
+ *   1. 路径最后一段 /action/<token> —— 最可靠，路径一定会透传
+ *   2. X-Ga-Token 头
+ *   3. ?token= 查询参数
+ *   4. Authorization: Bearer —— 本地直连的标准做法，保持优先兼容
+ * 本地直连时 Authorization 仍然有效，行为不变。
  */
-function member(req, room, url) {
+function member(req, room, url, pathToken = '') {
   const auth = req.headers.authorization;
-  const token = auth?.startsWith('Bearer ') ? auth.slice(7)
-    : req.headers['x-ga-token'] || url?.searchParams.get('token') || '';
+  const token = pathToken
+    || req.headers['x-ga-token']
+    || url?.searchParams.get('token')
+    || (auth?.startsWith('Bearer ') ? auth.slice(7) : '');
   if (!token) return -1;
   return room.players.findIndex(p => p && p.token === token);
 }
@@ -88,7 +92,9 @@ export const server = http.createServer(async (req, res) => {
         rooms.set(id, room);
         return json(res, 201, { roomId: id, seat: 0, token: p.token, state: snapshot(room) });
       }
-      const match = /^\/api\/rooms\/([A-F0-9]{6})\/(join|events|action)$/.exec(url.pathname);
+      // 身份可以放在路径最后一段（/action/<token>）。线上网关会吃掉 Authorization 头，
+      // 实测查询参数也到不了这里，只有路径是确定能透传的。
+      const match = /^\/api\/rooms\/([A-F0-9]{6})\/(join|events|action)(?:\/([a-f0-9]{48}))?$/.exec(url.pathname);
       if (!match) return json(res, 404, { message: '接口不存在' });
       const room = rooms.get(match[1]);
       if (!room) return json(res, 404, { message: '房间不存在或已过期，请重新创建' });
@@ -99,7 +105,7 @@ export const server = http.createServer(async (req, res) => {
         broadcast(room);
         return json(res, 200, { roomId: room.id, seat: 1, token: p.token, state: snapshot(room) });
       }
-      const seat = member(req, room, url);
+      const seat = member(req, room, url, match[3]);
       if (seat < 0) return json(res, 401, { message: '房间身份失效，请重新加入' });
       const p = room.players[seat];
       if (match[2] === 'events' && req.method === 'GET') {
