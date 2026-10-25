@@ -13,3 +13,7 @@ Thumbs.db
 
 # AI 协作工具的本地会话数据，不进仓库
 .workbuddy-ai/
+
+# 发布平台生成的本地标记（含本机路径），不进仓库
+.wbapp_*.genie
+.workbuddy/
