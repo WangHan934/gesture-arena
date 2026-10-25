@@ -57,9 +57,16 @@ test('the arena retains original spawn anchors', async () => {
 
 test('local Three.js import map and loaders are present', async () => {
   const html = await readFile(new URL('index.html',root),'utf8');
-  assert(html.includes('"three":"./vendor/three/build/three.module.js"'));
-  for (const name of ['build/three.module.js','build/three.core.js','examples/jsm/loaders/GLTFLoader.js','examples/jsm/utils/BufferGeometryUtils.js','examples/jsm/utils/SkeletonUtils.js','LICENSE']) {
+  // 目录名必须是 lib 不能是 build —— 发布平台会按目录名排除 build/，那样整页白屏
+  assert(html.includes('"three":"./vendor/three/lib/three.module.js"'));
+  for (const name of ['lib/three.module.js','lib/three.core.js','examples/jsm/loaders/GLTFLoader.js','examples/jsm/utils/BufferGeometryUtils.js','examples/jsm/utils/SkeletonUtils.js','LICENSE']) {
     assert((await readFile(new URL('vendor/three/'+name,root))).length > 0);
+  }
+  // 另外两个入口页也要跟着改，漏一个就会白屏
+  for (const page of ['classic.html','solo.html']) {
+    const other = await readFile(new URL(page,root),'utf8');
+    assert(other.includes('"three":"./vendor/three/lib/three.module.js"'), `${page} 的 importmap 没同步`);
+    assert(!other.includes('vendor/three/build/'), `${page} 还残留 build/ 路径`);
   }
   const main = await readFile(new URL('src/main.js',root),'utf8');
   assert(main.includes("import('./pvp/scene-3d.js')"));
