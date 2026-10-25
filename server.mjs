@@ -74,15 +74,32 @@ function destroyRoom(room) {
   rooms.delete(room.id);
 }
 
+/** Origin 是不是一个合法的来源（只挡畸形值，不比对主机名，原因见下面路由里的注释） */
+function isParseableOrigin(origin) {
+  try {
+    return Boolean(new URL(origin).host);
+  } catch {
+    return false;
+  }
+}
+
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.wasm': 'application/wasm', '.task': 'application/octet-stream', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json' };
 
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   try {
     if (url.pathname.startsWith('/api/')) {
-      // Same-origin browser mutations only. No permissive CORS.
+      // 同源校验。
+      // 【为什么不能拿 Origin 和 req.headers.host 硬比】
+      //   线上部署前面有一层网关（CloudStudio Gateway），它会把 Host 改写成内部地址，
+      //   于是 Origin（公网域名）永远和 Host 对不上 —— 浏览器一开房间就是 403，
+      //   表现为「开房间用不了」。所以只在 Origin 畸形时拒绝。
+      // 【为什么这样也够安全】
+      //   跨站写请求带 Content-Type: application/json 会先触发 CORS 预检，
+      //   本服务不响应 OPTIONS、也不发任何 Access-Control-* 头，浏览器直接拦掉；
+      //   而身份校验靠房间 token（路径携带），拿到 token 才改得动房间。
       const origin = req.headers.origin;
-      if (origin && new URL(origin).host !== req.headers.host) return json(res, 403, { message: '请从游戏页面操作' });
+      if (origin && !isParseableOrigin(origin)) return json(res, 403, { message: '请从游戏页面操作' });
       if (req.method === 'POST' && url.pathname === '/api/rooms') {
         if (rooms.size >= 500) return json(res, 503, { message: '房间已满，请稍后再试' });
         const data = await body(req);
