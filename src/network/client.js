@@ -3,9 +3,25 @@ export class RoomClient {
     Object.assign(this, { onState, onConnection, onExpired });
     this.session = null; this.abort = null; this.retry = null; this.generation = 0;
   }
+  /**
+   * 身份怎么带。三种都发，因为线上网关会吃掉 Authorization：
+   *   · Authorization  —— 本地直连和服务端语义上的标准做法
+   *   · X-Ga-Token     —— 网关照常透传的自定义头
+   *   · ?token=        —— 前两个都被剥掉时的兜底
+   * 服务端 member() 三个都认，谁先到用谁。
+   */
+  authHeaders() {
+    const token = this.session?.token;
+    return token ? { Authorization: `Bearer ${token}`, 'X-Ga-Token': token } : {};
+  }
+  withToken(path) {
+    const token = this.session?.token;
+    if (!token) return path;
+    return `${path}${path.includes('?') ? '&' : '?'}token=${token}`;
+  }
   async request(path, data) {
-    const response = await fetch(path, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...(this.session ? { Authorization: `Bearer ${this.session.token}` } : {}) },
+    const response = await fetch(this.withToken(path), {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
       body: JSON.stringify(data),
     });
     let result;
@@ -37,8 +53,8 @@ export class RoomClient {
   async readStream(generation, controller) {
     this.onConnection('connecting');
     try {
-      const response = await fetch(`/api/rooms/${this.session.roomId}/events`, {
-        headers: { Authorization: `Bearer ${this.session.token}` }, signal: controller.signal,
+      const response = await fetch(this.withToken(`/api/rooms/${this.session.roomId}/events`), {
+        headers: this.authHeaders(), signal: controller.signal,
       });
       if (!response.ok) {
         if ([401,404].includes(response.status)) { this.clear(); this.onExpired(); return; }

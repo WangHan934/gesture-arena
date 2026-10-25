@@ -31,10 +31,22 @@ function broadcast(room) {
   const data = `data: ${JSON.stringify(snapshot(room))}\n\n`;
   for (const player of room.players) for (const stream of player?.streams || []) stream.write(data);
 }
-function member(req, room) {
+/**
+ * 找出这个请求属于哪个座位。
+ *
+ * 为什么不止读 Authorization：线上部署时前面有一层网关，
+ * 它会把 Authorization 头吃掉，导致建房成功但后续请求全部 401。
+ * 所以另外接受两种携带方式（客户端三种都会发）：
+ *   · X-Ga-Token 头
+ *   · ?token= 查询参数
+ * 本地直连时 Authorization 仍然优先，行为不变。
+ */
+function member(req, room, url) {
   const auth = req.headers.authorization;
-  if (!auth?.startsWith('Bearer ')) return -1;
-  return room.players.findIndex(p => p && p.token === auth.slice(7));
+  const token = auth?.startsWith('Bearer ') ? auth.slice(7)
+    : req.headers['x-ga-token'] || url?.searchParams.get('token') || '';
+  if (!token) return -1;
+  return room.players.findIndex(p => p && p.token === token);
 }
 async function body(req) {
   let data = '';
@@ -87,7 +99,7 @@ export const server = http.createServer(async (req, res) => {
         broadcast(room);
         return json(res, 200, { roomId: room.id, seat: 1, token: p.token, state: snapshot(room) });
       }
-      const seat = member(req, room);
+      const seat = member(req, room, url);
       if (seat < 0) return json(res, 401, { message: '房间身份失效，请重新加入' });
       const p = room.players[seat];
       if (match[2] === 'events' && req.method === 'GET') {
