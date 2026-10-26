@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { MONSTERS } from './rules.js';
 import { GLTFLoader } from '../../vendor/three/examples/jsm/loaders/GLTFLoader.js';
 import { clone } from '../../vendor/three/examples/jsm/utils/SkeletonUtils.js';
+import { CombatFX } from '../fx/combat-fx.js';
+import { sfx } from '../audio/sfx.js';
 
 const URLS = {
   fire: new URL('../../assets/models/fire.glb', import.meta.url).href,
@@ -9,6 +11,12 @@ const URLS = {
   rock: new URL('../../assets/models/rock.glb', import.meta.url).href,
   arena: new URL('../../assets/models/arena.glb', import.meta.url).href,
 };
+
+/** 怪兽属性色，用来给特效上色（和 classic / solo 保持同一套） */
+const ELEMENT_COLOR = { fire: '#ff8a3d', shadow: '#b388ff', rock: '#9fd8ff' };
+
+/** 这几个技能在 PvP 里算远程，命中前打一道能量束过去 */
+const RANGED_SKILLS = new Set(['火球术', '雷霆万钧', '终极奥义']);
 
 export class Arena3D {
   constructor(canvas, onStatus) {
@@ -38,6 +46,11 @@ export class Arena3D {
     const rim = new THREE.DirectionalLight(0x9b85ff, 3);
     rim.position.set(-9, 7, -8);
     this.scene.add(rim);
+
+    // 打斗特效（火花 / 碎石 / 能量束 / 光圈 / 震动）。必须在 scene 建好之后
+    this.fx = new CombatFX(this.scene);
+    this.time = 0;
+    this._camBase = new THREE.Vector3();
     this.resize = new ResizeObserver(() => this.fit());
     canvas.addEventListener('webglcontextlost', event => {
       event.preventDefault();
@@ -171,6 +184,7 @@ export class Arena3D {
     this.lastTurns = null;
     this.lastLog = '';
     for (const fighter of this.fighters) {
+      this.fx.removeRing(fighter.ring);
       fighter.mixer.stopAllAction();
       fighter.mixer.uncacheRoot(fighter.object);
       this.scene.remove(fighter.root);
@@ -196,8 +210,10 @@ export class Arena3D {
         model.root.position.y += .25;
         model.root.rotation.y = i === seat ? Math.PI : 0;
         model.seat = i;
+        model.color = ELEMENT_COLOR[id] ?? '#ffb45a';
         this.scene.add(model.root);
         this.fighters.push(model);
+        model.ring = this.fx.addRing(model.root, model.color, 1.7);
         this.play(model, 'Idle');
       }
       this.camera.position.set(18, 10, 13);
@@ -206,6 +222,7 @@ export class Arena3D {
       this.camera.position.set(0, 11, 18);
       this.camera.lookAt(0, 1.3, 0);
     }
+    this._camBase.copy(this.camera.position);
     this.fit();
   }
 
@@ -225,14 +242,44 @@ export class Arena3D {
         const target = this.fighters.find(f => f.seat !== index);
         const skill = actor[2];
         if (fighter) this.play(fighter, skill === '护盾' ? 'Defend' : skill === '火球术' ? 'Attack' : 'Cast', true);
-        if (target && /造成/.test(log)) this.play(target, 'Hit', true);
+        if (target && /造成/.test(log)) {
+          this.play(target, 'Hit', true);
+          this.hitEffect(fighter, target, skill, log);
+        }
       }
     }
     if (battle.winner !== null && battle.winner !== 'draw') {
       const loser = this.fighters.find(f => f.seat !== battle.winner);
-      if (loser && !loser.dead) { loser.dead = true; this.play(loser, 'Death', true); }
+      if (loser && !loser.dead) { loser.dead = true; this.play(loser, 'Death', true); this.fx.impact(this.bodyPoint(loser), { color: loser.color, heavy: true }); sfx.death(); }
     }
     this.canvas.dataset.currentAnimations = this.fighters.map(f => `${f.id}:${f.action?.getClip().name || 'static'}`).join(',');
+  }
+
+  /**
+   * 命中表现：远程技能先打一道能量束，再在被打的一方身上爆开。
+   * 伤害数值从战报里读 —— 服务端已经算好了，前端不再重复计算。
+   */
+  hitEffect(actor, target, skill, log) {
+    if (!target) return;
+    const point = this.bodyPoint(target);
+    const color = target.color ?? '#ffb45a';
+    const damage = Number((/造成 (\d+) 点伤害/.exec(log) || [])[1] || 0);
+    const heavy = damage >= 20;
+
+    if (actor && RANGED_SKILLS.has(skill)) {
+      this.fx.beam(this.bodyPoint(actor), point, { color: ELEMENT_COLOR[actor.id] ?? color });
+      sfx.beam();
+    }
+
+    this.fx.impact(point, { color, heavy });
+    sfx.impact({ heavy });
+  }
+
+  /** 躯干高度，特效打这里最像「被打到」 */
+  bodyPoint(fighter) {
+    const point = fighter.root.position.clone();
+    point.y += 2.3;
+    return point;
   }
 
   update(dt) {
@@ -247,6 +294,13 @@ export class Arena3D {
         if (model.timer <= 0 && !model.dead) this.play(model, 'Idle');
       }
     }
+
+    this.time += dt;
+    this.fx.update(dt, this.time);
+    if (this._camBase.lengthSq() > 0) {
+      this.camera.position.copy(this._camBase).add(this.fx.shakeOffset(this.time));
+    }
+
     this.renderer.render(this.scene, this.camera);
     this.canvas.dataset.renderedFrames = String((Number(this.canvas.dataset.renderedFrames) || 0) + 1);
   }

@@ -11,6 +11,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from '../../vendor/three/examples/jsm/loaders/GLTFLoader.js';
 import { clone } from '../../vendor/three/examples/jsm/utils/SkeletonUtils.js';
+import { CombatFX } from '../fx/combat-fx.js';
 
 const URLS = {
   fire: new URL('../../assets/models/fire.glb', import.meta.url).href,
@@ -20,6 +21,9 @@ const URLS = {
 };
 
 const IDS = ['fire', 'shadow', 'rock'];
+
+/** 三只怪兽的属性和特效颜色（和 PvP 的怪兽表一致） */
+const ELEMENT_COLOR = { fire: '#ff8a3d', shadow: '#b388ff', rock: '#9fd8ff' };
 
 export class SoloScene {
   constructor(canvas, onStatus) {
@@ -63,6 +67,11 @@ export class SoloScene {
     });
 
     this.ready = this.load();
+
+    // 打斗特效：命中火花、碎石、能量束、脚底光圈、镜头震动
+    this.fx = new CombatFX(this.scene);
+    this.time = 0;
+    this._camBase = new THREE.Vector3();
   }
 
   mount(host) {
@@ -152,6 +161,7 @@ export class SoloScene {
     this.playModel(model, 'Idle');
     this.camera.position.set(0, 5.2, 12.5);
     this.camera.lookAt(0, 2.2, 0);
+    this._camBase.copy(this.camera.position);
   }
 
   /** 战斗：双方就位 */
@@ -181,16 +191,20 @@ export class SoloScene {
       model.seat = seat;
       model.base.copy(position);
       model.facing = seat === 0 ? -1 : 1;
+      model.color = ELEMENT_COLOR[slot.id] ?? '#ffb45a';
       this.scene.add(model.root);
       this.fighters.push(model);
+      model.ring = this.fx.addRing(model.root, model.color, 1.7);
       this.playModel(model, 'Idle');
     });
     this.camera.position.set(15.5, 7.6, 13.5);
     this.camera.lookAt(0, 2.1, 0);
+    this._camBase.copy(this.camera.position);
   }
 
   clearFighters() {
     for (const fighter of this.fighters) {
+      this.fx.removeRing(fighter.ring);
       fighter.mixer.stopAllAction();
       fighter.mixer.uncacheRoot(fighter.object);
       this.scene.remove(fighter.root);
@@ -230,6 +244,30 @@ export class SoloScene {
     fighter.dead = true;
     if (fighter.clips.some(c => c.name === 'Death')) this.playModel(fighter, 'Death', true);
     else fighter.fall = 0.001; // 交给 update 做倒下
+    // 倒下瞬间爆一下，比单纯播动画有打击感
+    this.fx.impact(this._bodyPoint(fighter), { color: fighter.color, heavy: true });
+  }
+
+  /** 命中特效。seat = 被打的那一方 */
+  impact(seat, { heavy = false } = {}) {
+    const fighter = this.fighters.find(f => f.seat === seat);
+    if (!fighter) return;
+    this.fx.impact(this._bodyPoint(fighter), { color: fighter.color, heavy });
+  }
+
+  /** 远程能量束：fromSeat 打到 toSeat */
+  beam(fromSeat, toSeat, { color = null } = {}) {
+    const from = this.fighters.find(f => f.seat === fromSeat);
+    const to = this.fighters.find(f => f.seat === toSeat);
+    if (!from || !to) return;
+    this.fx.beam(this._bodyPoint(from), this._bodyPoint(to), { color: color ?? from.color });
+  }
+
+  /** 躯干高度，特效打这里最像「被打到」 */
+  _bodyPoint(fighter) {
+    const point = fighter.root.position.clone();
+    point.y += 2.3;
+    return point;
   }
 
   update(dt) {
@@ -257,6 +295,14 @@ export class SoloScene {
         model.root.position.y = model.base.y - model.fall * 0.4;
       }
     }
+
+    this.time += dt;
+    this.fx.update(dt, this.time);
+    // 震动只改相机位置，不碰朝向；相机还没摆过（选怪前）就跳过
+    if (this._camBase.lengthSq() > 0) {
+      this.camera.position.copy(this._camBase).add(this.fx.shakeOffset(this.time));
+    }
+
     this.renderer.render(this.scene, this.camera);
   }
 }

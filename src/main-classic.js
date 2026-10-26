@@ -12,6 +12,7 @@ import { HUD } from './ui/hud.js';
 import { GestureCanvas } from './input/gesture-canvas.js';
 import { CameraInput } from './input/camera-input.js';
 import { KeyboardInput, resolveModeAction, isGlobalKey } from './input/keyboard-input.js';
+import { sfx } from './audio/sfx.js';
 import {
   MODES,
   MODE_IDS,
@@ -137,6 +138,12 @@ const keyboard = new KeyboardInput({
       doc.getElementById('camera-btn').click();
       return;
     }
+    if (code === 'KeyM') {
+      sfx.unlock();
+      sfx.toggle();
+      renderSfxBtn();
+      return;
+    }
     if (isGlobalKey(code)) return;
 
     // 5. 模式动作
@@ -150,6 +157,31 @@ const keyboard = new KeyboardInput({
     if (out?.started) startDuelBattle();
     renderKeyHint(); // 阶段可能变了（选怪 → 战斗），提示要跟着换
   },
+});
+
+/* ---------- 音效开关 ---------- */
+
+/**
+ * 浏览器要求 AudioContext 必须在用户手势后才能出声，
+ * 所以第一次点击 / 按键时才解锁。解锁前所有音效是静默 no-op。
+ */
+for (const evt of ['pointerdown', 'keydown']) {
+  window.addEventListener(evt, () => sfx.unlock(), { once: true, passive: true });
+}
+
+const sfxBtn = doc.getElementById('sfx-btn');
+
+function renderSfxBtn() {
+  if (!sfxBtn) return;
+  sfxBtn.textContent = sfx.enabled ? '音效 开' : '音效 关';
+  sfxBtn.classList.toggle('on', sfx.enabled);
+  sfxBtn.title = sfx.enabled ? '关闭音效（M）' : '开启音效（M）';
+}
+
+sfxBtn?.addEventListener('click', () => {
+  sfx.unlock();
+  sfx.toggle();
+  renderSfxBtn();
 });
 
 /* ---------- 小工具 ---------- */
@@ -510,6 +542,8 @@ const EMPTY_VIEW = {
 /* ---------- 主循环 ---------- */
 
 let last = performance.now();
+/** 上一次的胜负状态，用来在切换的一瞬间放结算音效 */
+let lastPhase = null;
 
 function frame(now) {
   // 限制单帧步长，切标签页回来时不会瞬间跳一大段
@@ -520,6 +554,12 @@ function frame(now) {
   gesture.update(dt);
 
   const view = mode ? mode.getView() : EMPTY_VIEW;
+
+  if (view.phase !== lastPhase) {
+    if (view.phase === 'win') sfx.win();
+    else if (view.phase === 'lose') sfx.lose();
+    lastPhase = view.phase;
+  }
 
   scene3d.render(view, dt);
 
@@ -532,6 +572,7 @@ function frame(now) {
 /* ---------- 启动 ---------- */
 
 buildModeCards();
+renderSfxBtn();
 
 const initial = resolveInitialMode(window.location.search, safeStorage());
 if (initial) {

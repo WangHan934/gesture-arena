@@ -5,10 +5,18 @@ import { recognizeSpell } from './input/gesture-recognizer.js';
 import { CameraInput } from './input/camera-input.js';
 import { AirStroke } from './input/air-stroke.js';
 import { SelectionScreen } from './ui/selection.js';
+import { sfx } from './audio/sfx.js';
 
 const $ = id => document.getElementById(id);
 let arenaView = null;
 let chosen = 'fire', state = null, connection = 'offline', pending = false, feedbackTimer, offset = 0;
+/** 上一次结算的胜负，用来只放一次结算音效 */
+let lastWinner = null;
+
+// 浏览器要求 AudioContext 在用户手势后才能出声
+for (const evt of ['pointerdown', 'keydown']) {
+  window.addEventListener(evt, () => sfx.unlock(), { once: true, passive: true });
+}
 const client = new RoomClient({
   onState(next) { const first=!state;state=next;if(first&&next.players[mySeat()]?.monster)chosen=next.players[mySeat()].monster;offset=next.serverNow-Date.now();render(); },
   onConnection(status) { connection=status; render(); },
@@ -64,7 +72,10 @@ function render(){
   for(const button of document.querySelectorAll('[data-spell]')){const id=button.dataset.spell,spell=SPELLS.find(s=>s.id===id),cd=Math.max(0,(a.cooldowns[id]||0)-(battle.turn!==seat?1:0));button.disabled=!canCast()||cd>0;button.querySelector('small').textContent=cd>0?`冷却 ${cd} 个己方回合`:spell.hint;}
   $('battle-log').replaceChildren(...battle.log.slice(-4).map(text=>{const li=document.createElement('li');li.textContent=text;return li;}));
   $('result').hidden=battle.winner===null;
-  if(battle.winner!==null){$('result-title').textContent=battle.winner==='draw'?'势均力敌':battle.winner===seat?'对决胜利':'下次再战';$('result-detail').textContent=`共 ${battle.turns} 回合 · 双方确认后再战`;$('rematch-btn').disabled=Boolean(self?.rematch)||connection!=='online';$('rematch-btn').textContent=self?.rematch?'等待对手确认…':'再战一局';}
+  if(battle.winner!==null){
+    if(lastWinner!==battle.winner){lastWinner=battle.winner;if(battle.winner==='draw')sfx.cast();else if(battle.winner===seat)sfx.win();else sfx.lose();}
+    $('result-title').textContent=battle.winner==='draw'?'势均力敌':battle.winner===seat?'对决胜利':'下次再战';$('result-detail').textContent=`共 ${battle.turns} 回合 · 双方确认后再战`;$('rematch-btn').disabled=Boolean(self?.rematch)||connection!=='online';$('rematch-btn').textContent=self?.rematch?'等待对手确认…':'再战一局';
+  } else lastWinner=null;
 }
 async function enter(join){
   const code=$('room-code').value.trim().toUpperCase();if(join&&!/^[A-F0-9]{6}$/.test(code)){tell('请输入六位房间码');return;}

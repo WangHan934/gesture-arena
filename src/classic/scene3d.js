@@ -32,6 +32,8 @@ import { clone } from '../../vendor/three/examples/jsm/utils/SkeletonUtils.js';
 import { WORLD } from '../config.js';
 import { DamageTracker } from './damage-tracker.js';
 import { FloatingNumbers } from './floaters.js';
+import { CombatFX } from '../fx/combat-fx.js';
+import { sfx } from '../audio/sfx.js';
 
 /** 旧生物 id → 3D 模型 id */
 const MODEL_OF = { stone: 'rock', fox: 'fire', bird: 'shadow', brute: 'rock' };
@@ -94,6 +96,12 @@ export class ClassicScene3D {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.45;
+
+    // 打斗特效：命中火花、碎石、能量束、脚底光圈、镜头震动。
+    // 注意必须放在 scene 建好之后 —— 它构造时就会往场景里塞粒子池
+    this.fx = new CombatFX(this.scene);
+    this.time = 0;
+    this._camBase = new THREE.Vector3();
 
     this.scene.add(new THREE.HemisphereLight(0xe2d9ff, 0x4a3241, 2.7));
     const key = new THREE.DirectionalLight(0xffecd2, 4.2);
@@ -186,6 +194,7 @@ export class ClassicScene3D {
     // 侧后方的三分之四视角，既看得到整条推进路线，也看得到怪兽侧面
     this.camera.position.set(11, 7.2, 8.6);
     this.camera.lookAt(0, 1.5, 0);
+    this._camBase.copy(this.camera.position);
   }
 
   /* ---------------- 主入口 ---------------- */
@@ -214,6 +223,11 @@ export class ClassicScene3D {
     this._updateUnits(dt);
     this._flushDamage(dt);
 
+    this.time += dt;
+    this.fx.update(dt, this.time);
+    // 震动只改相机位置，不碰朝向，避免画面晃得人晕
+    this.camera.position.copy(this._camBase).add(this.fx.shakeOffset(this.time));
+
     this.renderer.render(this.scene, this.camera);
 
     // 投影要用渲染后的相机矩阵，所以放在 render 之后
@@ -229,7 +243,7 @@ export class ClassicScene3D {
     for (const creature of world?.creatures ?? []) {
       const key = `c${creature.id}`;
       seen.add(key);
-      const unit = this._ensureUnit(key, creature.def?.id, 'creature');
+      const unit = this._ensureUnit(key, creature.def?.id, 'creature', creature.def?.color);
       if (!unit) continue;
 
       const t = creature.x / WORLD.width;
@@ -278,7 +292,10 @@ export class ClassicScene3D {
         retiring: 0,
         side: which === 0 ? 'player' : 'enemy',
         headY: 1.9, // 晶体顶到这里的跳字高度
+        color: which === 0 ? '#6fa8ff' : '#ff7a6b',
+        ring: null,
       };
+      unit.ring = this.fx.addRing(root, unit.color, 1.35);
       this.units.set(key, unit);
     }
 
@@ -316,7 +333,7 @@ export class ClassicScene3D {
   }
 
   _syncFighter(key, fighter, facing, lunge, t) {
-    const unit = this._ensureUnit(key, fighter.id, 'fighter');
+    const unit = this._ensureUnit(key, fighter.id, 'fighter', fighter.color);
     if (!unit) return;
 
     unit.jitter = 0; // 决斗是正面对峙，不做横向错开
@@ -372,7 +389,7 @@ export class ClassicScene3D {
 
   /* ---------------- 单位池 ---------------- */
 
-  _ensureUnit(key, creatureId, role) {
+  _ensureUnit(key, creatureId, role, color = '#ffb45a') {
     const existing = this.units.get(key);
     if (existing) {
       // 决斗重开时换了一只生物：key 没变但模型要跟着换，
@@ -399,10 +416,14 @@ export class ClassicScene3D {
       retiring: 0,
       // 跳字从头顶冒出来，高度用生物的实际身高（巨魔会更高）
       headY: HEIGHT_OF[creatureId] ?? 2.4,
+      // 特效颜色跟着生物属性走：火系橙、岩系青、影系紫
+      color,
+      ring: null,
     };
 
     this.scene.add(model.root);
     this._play(model, 'Idle');
+    unit.ring = this.fx.addRing(model.root, color, unit.headY * 0.42);
     this.units.set(key, unit);
     return unit;
   }
@@ -459,6 +480,9 @@ export class ClassicScene3D {
       if (seen.has(key)) continue;
       unit.retiring = RETIRE_TIME;
       if (unit.model) this._play(unit.model, 'Death', true);
+      // 倒下瞬间来一发爆点，比单纯播动画有打击感
+      this.fx.impact(this._bodyPoint(unit), { color: unit.color ?? '#ffb45a', heavy: true });
+      sfx.death();
     }
   }
 
@@ -497,6 +521,33 @@ export class ClassicScene3D {
   _popDamage(unit, { value, ratio }) {
     const big = this.kind === 'duel' ? value >= BIG_DUEL_VALUE : ratio >= BIG_RATIO;
     this._spawnFloater(unit, `-${value}`, DAMAGE_COLOR[unit.side] ?? DAMAGE_COLOR.enemy, big);
+
+    const point = this._bodyPoint(unit);
+    const color = unit.color ?? '#ffb45a';
+
+    // 决斗里的大招是远程手段：先打一道能量束过去，再在对方身上爆开
+    if (big && this.kind === 'duel') {
+      const from = this._oppositeBodyPoint(unit);
+      if (from) this.fx.beam(from, point, { color });
+      sfx.beam();
+    }
+
+    this.fx.impact(point, { color, heavy: big });
+    if (unit.kind === 'tower') sfx.towerHit();
+    else sfx.impact({ heavy: big });
+  }
+
+  /** 躯干高度：特效打在这里最像「被打到」，打脚底会像踩地，打头顶会飘 */
+  _bodyPoint(unit) {
+    const point = unit.root.position.clone();
+    point.y += (unit.headY ?? 2.4) * 0.55;
+    return point;
+  }
+
+  /** 决斗里对手的躯干位置，用来当能量束的起点 */
+  _oppositeBodyPoint(unit) {
+    const other = this.units.get(unit.key === 'duelPlayer' ? 'duelEnemy' : 'duelPlayer');
+    return other ? this._bodyPoint(other) : null;
   }
 
   /** 塔防攒够一个时间片的伤害，在这里统一跳出来 */
@@ -525,6 +576,7 @@ export class ClassicScene3D {
       unit.model.mixer.stopAllAction();
       unit.model.mixer.uncacheRoot(unit.model.object);
     }
+    this.fx.removeRing(unit.ring);
     this.scene.remove(unit.root);
     this.units.delete(key);
     this.damage.forget(key); // 记录跟着单位一起走，否则打一局会攒下几百条
@@ -538,6 +590,7 @@ export class ClassicScene3D {
 
   destroy() {
     this._clearUnits();
+    this.fx.dispose();
     this.resize.disconnect();
     this.renderer.dispose();
   }

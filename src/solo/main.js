@@ -15,6 +15,7 @@ import { GestureCanvas } from '../input/gesture-canvas.js';
 import { recognizeSpell } from '../input/gesture-recognizer.js';
 import { CameraInput } from '../input/camera-input.js';
 import { AirStroke } from '../input/air-stroke.js';
+import { sfx } from '../audio/sfx.js';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage');
@@ -101,6 +102,8 @@ function startFight() {
   enemy = pickEnemy();
   battle = createBattle(player.id, enemy);
   started = true;
+  sfx.unlock();
+  sfx.summon();
 
   $('select').hidden = true;
   $('fight').hidden = false;
@@ -122,6 +125,7 @@ function startFight() {
 
 function endFight() {
   const win = battle.winner === 'win';
+  if (win) sfx.win(); else sfx.lose();
   $('result-title').textContent = win ? '胜利' : '失败';
   $('result-detail').textContent =
     `用时 ${battle.time.toFixed(1)} 秒 · 剩余生命 ${battle.hp.player} / ${PLAYER_HP}`;
@@ -237,6 +241,15 @@ function handleEvents() {
         scene?.play(0, event.spell === 'circle' ? 'Attack' : 'Cast');
         scene?.play(1, 'Hit');
         floatText(`-${event.damage}`, 'to-enemy');
+        // 高伤技能是远程的：先打一道能量束，再在对方身上爆开
+        if (event.damage >= 22) {
+          scene?.beam(0, 1);
+          sfx.beam();
+          scene?.impact(1, { heavy: true });
+        } else {
+          scene?.impact(1, { heavy: false });
+        }
+        sfx.impact({ heavy: event.damage >= 22 });
         if (battle.hp.enemy <= 0) scene?.die(1);
         break;
       case 'enemyHit':
@@ -244,20 +257,26 @@ function handleEvents() {
         scene?.play(0, 'Hit');
         floatText(event.blocked ? `-${event.damage} 挡住` : `-${event.damage}`, 'to-player');
         flashHurt();
+        scene?.impact(0, { heavy: !event.blocked && event.damage >= 12 });
+        sfx.impact({ heavy: !event.blocked && event.damage >= 12 });
         if (battle.hp.player <= 0) scene?.die(0);
         break;
       case 'heal':
         scene?.play(0, 'Cast');
         if (event.amount > 0) floatText(`+${event.amount}`, 'heal');
+        sfx.cast();
         break;
       case 'shield':
         scene?.play(0, 'Defend');
+        sfx.cast();
         break;
       case 'support':
         scene?.play(0, 'Cast');
+        sfx.cast();
         break;
       case 'enemyWindup':
         tell(`敌方蓄力重击（${event.damage} 点）· 现在开盾能减半`);
+        sfx.cast();
         break;
       default:
         break;
@@ -334,6 +353,12 @@ $('camera-btn').addEventListener('click', async () => {
 
 window.addEventListener('keydown', event => {
   if (event.repeat || event.isComposing || ['INPUT', 'TEXTAREA'].includes(event.target.tagName) || event.target.isContentEditable) return;
+  if (event.code === 'KeyM') {
+    sfx.unlock();
+    sfx.toggle();
+    renderSfxBtn();
+    return;
+  }
   if (!started) {
     const pick = /^(?:Digit|Numpad)([1-3])$/.exec(event.code);
     if (pick) {
@@ -358,6 +383,28 @@ document.addEventListener('visibilitychange', () => {
   // 切走再回来，主循环的 dt 已经截断，这里只负责把画到一半的笔迹丢掉
   if (document.hidden) air.reset();
 });
+
+/* ---------------- 音效开关 ---------------- */
+
+/** 浏览器要求 AudioContext 在用户手势后才能出声，首次点击 / 按键时解锁 */
+for (const evt of ['pointerdown', 'keydown']) {
+  window.addEventListener(evt, () => sfx.unlock(), { once: true, passive: true });
+}
+
+function renderSfxBtn() {
+  const button = $('solo-sfx');
+  if (!button) return;
+  button.textContent = sfx.enabled ? '音效 开' : '音效 关';
+  button.title = sfx.enabled ? '关闭音效（M）' : '开启音效（M）';
+}
+
+$('solo-sfx')?.addEventListener('click', () => {
+  sfx.unlock();
+  sfx.toggle();
+  renderSfxBtn();
+});
+
+renderSfxBtn();
 
 /* ---------------- 3D 与主循环 ---------------- */
 

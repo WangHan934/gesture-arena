@@ -1,4 +1,5 @@
 import { MONSTERS, SPELLS, TURN_MS } from '../pvp/rules.js';
+import { sfx } from '../audio/sfx.js';
 
 // Visual presentation only. IDs, health and spells always come from the PvP rules.
 export const MONSTER_PROFILES = {
@@ -14,7 +15,7 @@ export class SelectionScreen {
     this.roster = document.getElementById('home-roster');
     this.onSelect = onSelect;
     this.selected = null;
-    this.sound = false;
+    this.sound = true;
     this.buttons = [];
     for (const [index, monster] of MONSTERS.entries()) {
       const profile = MONSTER_PROFILES[monster.id];
@@ -70,10 +71,19 @@ export class SelectionScreen {
       if (event.target === this.dialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) this.dialog.close();
     });
     const soundButton = document.getElementById('selection-sound');
+    // 这一个开关同时管界面音效和战斗音效（战斗音效在 scene-3d.js 里播）
+    const renderSound = () => {
+      soundButton.setAttribute('aria-pressed', String(this.sound));
+      soundButton.setAttribute('aria-label', this.sound ? '关闭音效' : '开启音效');
+      soundButton.title = this.sound ? '关闭音效' : '开启音效';
+      sfx.setEnabled(this.sound);
+    };
     soundButton.addEventListener('click', () => {
-      this.sound = !this.sound; soundButton.setAttribute('aria-pressed', String(this.sound));
-      soundButton.setAttribute('aria-label', this.sound ? '关闭界面音效' : '开启界面音效'); this.tone();
+      this.sound = !this.sound;
+      renderSound();
+      this.tone();
     });
+    renderSound();
     window.addEventListener('keydown', event => {
       if (this.home.hidden || this.dialog.open || event.repeat || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName) || event.target.isContentEditable) return;
       const match = /^(?:Digit|Numpad)([1-3])$/.exec(event.code);
