@@ -59,6 +59,18 @@ function makeGlowTexture() {
   return texture;
 }
 
+/** 六种手势符号的绘制路径（128×128 画布内），键和识别器的 id 一致 */
+const SYMBOL_PATHS = {
+  circle: (ctx) => ctx.arc(64, 64, 40, 0, Math.PI * 2),
+  line_v: (ctx) => { ctx.moveTo(64, 20); ctx.lineTo(64, 108); },
+  line_h: (ctx) => { ctx.moveTo(20, 64); ctx.lineTo(108, 64); },
+  zigzag: (ctx) => { ctx.moveTo(24, 100); ctx.lineTo(48, 34); ctx.lineTo(76, 92); ctx.lineTo(104, 28); },
+  v_shape: (ctx) => { ctx.moveTo(24, 28); ctx.lineTo(64, 100); ctx.lineTo(104, 28); },
+  triangle: (ctx) => { ctx.moveTo(64, 22); ctx.lineTo(106, 100); ctx.lineTo(22, 100); ctx.closePath(); },
+  square: (ctx) => { ctx.moveTo(28, 28); ctx.lineTo(100, 28); ctx.lineTo(100, 100); ctx.lineTo(28, 100); ctx.closePath(); },
+  two: (ctx) => { ctx.moveTo(64, 20); ctx.lineTo(64, 108); },
+};
+
 export class CombatFX {
   /**
    * @param {THREE.Scene} scene
@@ -79,6 +91,8 @@ export class CombatFX {
     this._bolts = this._makeBolts();
     this._bubbles = [];
     this._embers = this._makeEmbers();
+    this._symbols = [];
+    this._symbolCache = new Map();
   }
 
   /* ---------------- 火花 ---------------- */
@@ -721,6 +735,82 @@ export class CombatFX {
     geometry.attributes.color.needsUpdate = true;
   }
 
+  /* ---------------- 手势符号 ---------------- */
+
+  /**
+   * 在空中画出这次手势的符号（○ │ Z V △ □ —），再飞向目标。
+   *
+   * 这是「手势动作」的可视化：角色出手前，先在身前把符号勾出来，
+   * 观众能立刻看出这一下是哪个技能。符号用 canvas 现画成贴图再贴到 Sprite 上，
+   * 不依赖任何图片资源，六种形状各缓存一张。
+   */
+  symbol(position, shape, { color = '#9fd8ff', size = 1.6, life = 0.42 } = {}) {
+    if (!position) return;
+    const texture = this._symbolTexture(shape, color);
+    if (!texture) return;
+
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.copy(position);
+    sprite.scale.setScalar(size * 0.4);
+    this.scene.add(sprite);
+    this._symbols.push({ sprite, life, maxLife: life, size });
+  }
+
+  _symbolTexture(shape, color) {
+    const key = `${shape}|${color}`;
+    const cached = this._symbolCache.get(key);
+    if (cached) return cached;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 12;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 22;
+    ctx.beginPath();
+
+    const draw = SYMBOL_PATHS[shape];
+    if (!draw) return null;
+    draw(ctx, 128);
+
+    ctx.stroke();
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    this._symbolCache.set(key, texture);
+    return texture;
+  }
+
+  _updateSymbols(dt) {
+    for (let i = this._symbols.length - 1; i >= 0; i--) {
+      const item = this._symbols[i];
+      item.life -= dt;
+      if (item.life <= 0) {
+        this.scene.remove(item.sprite);
+        item.sprite.material.dispose();
+        this._symbols.splice(i, 1);
+        continue;
+      }
+      const progress = 1 - item.life / item.maxLife;
+      // 快速勾出来 → 停顿 → 淡出
+      const grow = progress < 0.28 ? progress / 0.28 : 1;
+      item.sprite.scale.setScalar(item.size * (0.4 + grow * 0.6));
+      item.sprite.material.opacity = progress < 0.7 ? 1 : Math.max(0, (1 - progress) / 0.3);
+    }
+  }
+
   /* ---------------- 对外接口 ---------------- */
 
   /**
@@ -833,6 +923,7 @@ export class CombatFX {
     this._updateShockwaves(dt);
     this._updateBolts(dt);
     this._updateBubbles(dt);
+    this._updateSymbols(dt);
     this._updateEmbers(dt, time);
 
     for (const item of this._beams.items) {
@@ -867,6 +958,14 @@ export class CombatFX {
       bubble.mesh.material.dispose();
     }
     this._bubbles.length = 0;
+
+    for (const item of this._symbols) {
+      this.scene.remove(item.sprite);
+      item.sprite.material.dispose();
+    }
+    this._symbols.length = 0;
+    for (const texture of this._symbolCache.values()) texture.dispose();
+    this._symbolCache.clear();
 
     this.scene.remove(this._embers.points);
     this._embers.geometry.dispose();

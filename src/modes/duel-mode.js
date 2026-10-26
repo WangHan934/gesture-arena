@@ -119,6 +119,8 @@ export class DuelMode {
     this._lunge = { player: 0, enemy: 0 };
     this._hit = { player: 0, enemy: 0 };
     this._effects = [];
+    // 最近一次手势（id + 自增序号），给 3D 层做动作和符号
+    this._gesture = { id: null, seq: 0 };
     // 走位的显示值：平滑追向 system.distance，避免一次瞬移
     this._visualDistance = 0;
   }
@@ -179,6 +181,7 @@ export class DuelMode {
 
     // 横线 = 走位，方向由笔画决定（从左往右 = 靠近，从右往左 = 拉开）
     if (result.id === 'line_h') {
+      this._remember('line_h');
       return this._move(result.dir === 'rtl' ? 'away' : 'toward');
     }
 
@@ -203,7 +206,13 @@ export class DuelMode {
       return { ok: false, message: '现在出不了招' };
     }
 
+    this._remember(result.id);
     return { ok: true, message: `${ACTION_LABEL[action]} ${res.damage}` };
+  }
+
+  /** 记下这次手势，3D 层拿它勾符号、播对应动作 */
+  _remember(id) {
+    this._gesture = { id, seq: this._gesture.seq + 1 };
   }
 
   /**
@@ -245,6 +254,7 @@ export class DuelMode {
       if (this._phase !== 'playing') {
         return { ok: false, message: this._phase === 'select' ? '先选一只生物' : '本局已结束' };
       }
+      this._remember('line_h');
       return this._move(action);
     }
 
@@ -396,6 +406,9 @@ export class DuelMode {
         // 走位状态：给渲染器画「够不够得着」的提示
         distance: s.distance,
         inPlayerRange: s.inPlayerRange,
+        // 最近一次手势：3D 层用它勾符号、播对应动作。
+        // 用自增 seq 而不是时间戳，渲染层比较 seq 就不会重复播放
+        gesture: this._gesture,
         // 重击会不会打中（拉开就躲得掉）
         heavyWillHit: s.distance <= this.system.rules.enemyHeavyReach,
       },

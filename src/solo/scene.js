@@ -25,6 +25,16 @@ const IDS = ['fire', 'shadow', 'rock'];
 /** 三只怪兽的属性和特效颜色（和 PvP 的怪兽表一致） */
 const ELEMENT_COLOR = { fire: '#ff8a3d', shadow: '#b388ff', rock: '#9fd8ff' };
 
+/** 技能 id → 手势符号，用来在角色身前勾出这次的招式 */
+const SYMBOL_OF = {
+  circle: 'circle',
+  line_v: 'line_v',
+  line_h: 'line_h',
+  two: 'two',
+  triangle: 'triangle',
+  square: 'square',
+};
+
 export class SoloScene {
   constructor(canvas, onStatus) {
     this.canvas = canvas;
@@ -280,6 +290,9 @@ export class SoloScene {
     const self = this._bodyPoint(caster);
     const to = target ? this._bodyPoint(target) : null;
 
+    // 先在身前把这次手势的符号勾出来，观众一眼能看出是哪一招
+    this.fx.symbol(this._frontPoint(caster, target), SYMBOL_OF[spellId] ?? 'circle', { color, size: 2.4 });
+
     switch (spellId) {
       // 火球术：抬手 → 一颗火球飞过去 → 命中炸开
       case 'circle':
@@ -342,6 +355,17 @@ export class SoloScene {
   _bodyPoint(fighter) {
     const point = fighter.root.position.clone();
     point.y += 2.3;
+    return point;
+  }
+
+  /** 身前半个身位：符号勾在胸口前方，朝着对手 */
+  _frontPoint(caster, target) {
+    const point = this._bodyPoint(caster);
+    point.y += 1.15;
+    if (target) {
+      const dir = target.root.position.clone().sub(caster.root.position).setY(0).normalize();
+      point.addScaledVector(dir, 1.8);
+    }
     return point;
   }
 

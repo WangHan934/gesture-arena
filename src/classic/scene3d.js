@@ -66,6 +66,18 @@ const DAMAGE_COLOR = { enemy: '#ffe08a', player: '#ff8a8a' };
 const BIG_RATIO = 0.06;
 const BIG_DUEL_VALUE = 22;
 
+/** 手势 id → 符号形状，出手时在角色身前勾出来 */
+const GESTURE_SHAPE = {
+  circle: 'circle',
+  line_h: 'line_h',
+  line_v: 'line_v',
+  zigzag: 'zigzag',
+  v_shape: 'v_shape',
+  triangle: 'triangle',
+  square: 'square',
+  two: 'two',
+};
+
 export class ClassicScene3D {
   /**
    * @param {HTMLCanvasElement} canvas
@@ -103,6 +115,9 @@ export class ClassicScene3D {
     this.time = 0;
     this._camBase = new THREE.Vector3();
     this._baseFov = this.camera.fov;
+    // 上一次播过的手势序号 / 上一帧玩家的走位位置
+    this._gestureSeq = 0;
+    this._lastPlayerT = undefined;
 
     this.scene.add(new THREE.HemisphereLight(0xcbd6ff, 0x2a1c2e, 1.85));
     const key = new THREE.DirectionalLight(0xffd9b0, 3.5);
@@ -256,10 +271,20 @@ export class ClassicScene3D {
       const t = creature.x / WORLD.width;
       this._placeAlongLane(unit, t, creature.side === 'player' ? 1 : -1);
 
-      // 受击/出手时切动画，其余时间待机
+      // 这一帧有没有在往前走
+      const moved = unit.lastT !== undefined && Math.abs(t - unit.lastT) > 0.0004;
+      unit.lastT = t;
+
+      // 受击/出手时切动画，走路时播 Walk，其余时间待机
       if (creature.hitFlash > 0) this._play(unit.model, 'Hit', true);
       else if (creature.attackPulse > 0) this._play(unit.model, 'Attack', true);
+      else if (moved) this._play(unit.model, 'Walk');
       else this._play(unit.model, 'Idle');
+
+      // 刚体模型（紫晶影魔 / 幽晶岩魔）没有 Walk 动画，用上下颠一下代替走路
+      if (moved && !this._hasClip(unit.model, 'Walk')) {
+        unit.root.position.y += Math.abs(Math.sin(this.time * 9 + unit.bobPhase)) * 0.14;
+      }
 
       // 出场时从小到大，别凭空蹦出来
       const pop = creature.spawnAnim ?? 1;
@@ -333,6 +358,20 @@ export class ClassicScene3D {
 
     this._syncFighter('duelPlayer', world.player, 1, world.lunge?.player ?? 0, tPlayer);
     this._syncFighter('duelEnemy', world.enemy, -1, world.lunge?.enemy ?? 0, DUEL_ENEMY_T);
+
+    // 玩家在走位（distance 变化）时播走路
+    const playerUnit = this.units.get('duelPlayer');
+    if (playerUnit) {
+      const moved = this._lastPlayerT !== undefined && Math.abs(tPlayer - this._lastPlayerT) > 0.0004;
+      this._lastPlayerT = tPlayer;
+      if (moved && !world.lunge?.player) {
+        if (this._hasClip(playerUnit.model, 'Walk')) this._play(playerUnit.model, 'Walk');
+        else playerUnit.root.position.y += Math.abs(Math.sin(this.time * 9 + playerUnit.bobPhase)) * 0.12;
+      }
+    }
+
+    // 手势符号 + 对应动作（seq 变了才播一次）
+    this._playGesture(world.gesture);
 
     // 被打了就闪一下（用受击动画代替颜色闪烁）
     if (world.hit?.player > 0.1) this._play(this.units.get('duelPlayer')?.model, 'Hit', true);
@@ -423,6 +462,8 @@ export class ClassicScene3D {
       retiring: 0,
       // 跳字从头顶冒出来，高度用生物的实际身高（巨魔会更高）
       headY: HEIGHT_OF[creatureId] ?? 2.4,
+      // 刚体模型走路时上下颠的相位，避免全场同步
+      bobPhase: Math.random() * Math.PI * 2,
       // 特效颜色跟着生物属性走：火系橙、岩系青、影系紫
       color,
       ring: null,
@@ -463,8 +504,12 @@ export class ClassicScene3D {
     };
   }
 
-  _play(model, name, once = false) {
-    // 注意：这里要的是「模型」不是「单位包装对象」，传错会直接把主循环搞挂
+  /** 这个模型有没有某个动画片段（刚体模型一个都没有） */
+  _hasClip(model, name) {
+    return Boolean(model?.clips?.some((clip) => clip.name === name));
+  }
+
+  _play(model, name, once = false) {    // 注意：这里要的是「模型」不是「单位包装对象」，传错会直接把主循环搞挂
     if (!model || !Array.isArray(model.clips)) return;
     const clip = model.clips.find((c) => c.name === name);
     if (!clip) return; // 没有这个动作就保持当前状态，不伪造
@@ -560,6 +605,41 @@ export class ClassicScene3D {
   _oppositeBodyPoint(unit) {
     const other = this.units.get(unit.key === 'duelPlayer' ? 'duelEnemy' : 'duelPlayer');
     return other ? this._bodyPoint(other) : null;
+  }
+
+  /** 身前半个身位，符号勾在这里，朝着对手 */
+  _frontOf(unit, other) {
+    const point = this._bodyPoint(unit);
+    point.y += 1.15;
+    if (other) {
+      const dir = other.root.position.clone().sub(unit.root.position).setY(0).normalize();
+      point.addScaledVector(dir, 1.8);
+    }
+    return point;
+  }
+
+  /**
+   * 手势 → 身前勾出符号 + 播对应动作。
+   * 用自增 seq 判断，同一个手势只播一次。
+   */
+  _playGesture(gesture) {
+    if (!gesture || gesture.seq === this._gestureSeq) return;
+    this._gestureSeq = gesture.seq;
+    if (!gesture.id) return;
+
+    const unit = this.units.get('duelPlayer');
+    if (!unit) return;
+
+    const enemy = this.units.get('duelEnemy');
+    this.fx.symbol(this._frontOf(unit, enemy), GESTURE_SHAPE[gesture.id] ?? 'circle', {
+      color: unit.color ?? '#9fd8ff',
+      size: 2.4,
+    });
+
+    // 有骨骼就播对应动作；刚体模型靠 _syncFighter 的前冲给反馈
+    if (gesture.id === 'zigzag') this._play(unit.model, 'Attack', true);
+    else if (gesture.id === 'v_shape') this._play(unit.model, 'Cast', true);
+    else if (gesture.id === 'line_h') this._play(unit.model, 'Walk', true);
   }
 
   /** 塔防攒够一个时间片的伤害，在这里统一跳出来 */

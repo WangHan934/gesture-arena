@@ -18,6 +18,16 @@ const ELEMENT_COLOR = { fire: '#ff8a3d', shadow: '#b388ff', rock: '#9fd8ff' };
 /** 这几个技能在 PvP 里算远程，命中前打一道能量束过去 */
 const RANGED_SKILLS = new Set(['火球术', '雷霆万钧', '终极奥义']);
 
+/** 技能名 → 手势符号，出手前在角色身前勾出来 */
+const SYMBOL_OF = {
+  火球术: 'circle',
+  雷霆万钧: 'line_v',
+  终极奥义: 'line_h',
+  治愈之光: 'two',
+  召唤援军: 'triangle',
+  护盾: 'square',
+};
+
 export class Arena3D {
   constructor(canvas, onStatus) {
     this.canvas = canvas;
@@ -265,6 +275,11 @@ export class Arena3D {
     const to = target ? this.bodyPoint(target) : null;
     const actorColor = ELEMENT_COLOR[actor?.id] ?? '#ffb45a';
 
+    // 出手前先在身前勾出手势符号
+    if (actor && SYMBOL_OF[skill]) {
+      this.fx.symbol(this.frontPoint(actor, target), SYMBOL_OF[skill], { color: actorColor, size: 2.4 });
+    }
+
     // 没有伤害的技能：护盾 / 治疗 / 援军
     if (!/造成/.test(log)) {
       if (!actor) return;
@@ -308,6 +323,17 @@ export class Arena3D {
   bodyPoint(fighter) {
     const point = fighter.root.position.clone();
     point.y += 2.3;
+    return point;
+  }
+
+  /** 身前半个身位：符号勾在胸口前方，朝着对手 */
+  frontPoint(actor, target) {
+    const point = this.bodyPoint(actor);
+    point.y += 1.15;
+    if (target) {
+      const dir = target.root.position.clone().sub(actor.root.position).setY(0).normalize();
+      point.addScaledVector(dir, 1.8);
+    }
     return point;
   }
 
