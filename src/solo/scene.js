@@ -37,21 +37,21 @@ export class SoloScene {
     this.lost = false;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#171221');
-    this.scene.fog = new THREE.Fog('#171221', 28, 65);
+    this.scene.background = new THREE.Color('#120d1c');
+    this.scene.fog = new THREE.Fog('#120d1c', 22, 55);
 
     this.camera = new THREE.PerspectiveCamera(43, 1, 0.1, 150);
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.45;
+    this.renderer.toneMappingExposure = 1.18;
 
-    this.scene.add(new THREE.HemisphereLight(0xe2d9ff, 0x4a3241, 2.7));
-    const key = new THREE.DirectionalLight(0xffecd2, 4.2);
+    this.scene.add(new THREE.HemisphereLight(0xcbd6ff, 0x2a1c2e, 1.85));
+    const key = new THREE.DirectionalLight(0xffd9b0, 3.5);
     key.position.set(4, 12, 8);
     this.scene.add(key);
-    const rim = new THREE.DirectionalLight(0x9b85ff, 3);
+    const rim = new THREE.DirectionalLight(0x7f6bff, 4.4);
     rim.position.set(-9, 7, -8);
     this.scene.add(rim);
 
@@ -72,6 +72,7 @@ export class SoloScene {
     this.fx = new CombatFX(this.scene);
     this.time = 0;
     this._camBase = new THREE.Vector3();
+    this._baseFov = this.camera.fov;
   }
 
   mount(host) {
@@ -263,6 +264,80 @@ export class SoloScene {
     this.fx.beam(this._bodyPoint(from), this._bodyPoint(to), { color: color ?? from.color });
   }
 
+  /**
+   * 技能动作编排：按技能决定「怎么出手、飞什么、怎么炸」。
+   *
+   * 只有 fire 有骨骼动画（Attack / Cast / Defend / Hit / Death），
+   * shadow 和 rock 是刚体，没有绑定 —— 所以动作反馈统一是
+   * 「播能播的骨骼动作 + 前冲/后仰 + 特效」，不给刚体伪造骨骼动作。
+   */
+  castSpell(seat, spellId) {
+    const caster = this.fighters.find(f => f.seat === seat);
+    const target = this.fighters.find(f => f.seat !== seat);
+    if (!caster) return;
+
+    const color = caster.color ?? '#ffb45a';
+    const self = this._bodyPoint(caster);
+    const to = target ? this._bodyPoint(target) : null;
+
+    switch (spellId) {
+      // 火球术：抬手 → 一颗火球飞过去 → 命中炸开
+      case 'circle':
+        this.play(seat, 'Cast');
+        if (to) {
+          this.fx.projectile(self, to, {
+            color,
+            speed: 18,
+            onArrive: (point) => this.fx.shockwave(point, { color, radius: 1.9, life: 0.36 }),
+          });
+        }
+        break;
+
+      // 雷霆万钧：抬手 → 天降闪电 + 冲击波 + 推近
+      case 'line_v':
+        this.play(seat, 'Cast');
+        if (to) {
+          this.fx.bolt(to, { color });
+          this.fx.shockwave(to, { color, radius: 2.4 });
+          this.fx.punch(0.7);
+        }
+        break;
+
+      // 终极奥义：粗光束 + 大冲击波 + 最强推近
+      case 'line_h':
+        this.play(seat, 'Cast');
+        if (to) {
+          this.fx.beam(self, to, { color, radius: 2.2 });
+          this.fx.impact(to, { color, heavy: true });
+          this.fx.shockwave(to, { color, radius: 3.4, life: 0.6 });
+          this.fx.punch(1);
+        }
+        break;
+
+      // 治愈之光：上浮的绿色光点
+      case 'two':
+        this.play(seat, 'Cast');
+        this.fx.motes(caster.root, { color: '#9dffb0', count: 12, radius: 1.4 });
+        break;
+
+      // 召唤援军：金色聚气
+      case 'triangle':
+        this.play(seat, 'Cast');
+        this.fx.motes(caster.root, { color: '#ffe08a', count: 10, radius: 1.3 });
+        break;
+
+      // 护盾：球形护罩跟着单位走，持续到技能时间结束
+      case 'square':
+        this.play(seat, 'Defend');
+        this.fx.bubble(caster.root, { color: '#9fd8ff', duration: 3.5, radius: 2.6 });
+        break;
+
+      default:
+        this.play(seat, 'Cast');
+        break;
+    }
+  }
+
   /** 躯干高度，特效打这里最像「被打到」 */
   _bodyPoint(fighter) {
     const point = fighter.root.position.clone();
@@ -301,6 +376,12 @@ export class SoloScene {
     // 震动只改相机位置，不碰朝向；相机还没摆过（选怪前）就跳过
     if (this._camBase.lengthSq() > 0) {
       this.camera.position.copy(this._camBase).add(this.fx.shakeOffset(this.time));
+    }
+    // 重击时镜头轻轻推近，再自己弹回
+    const fov = this._baseFov - this.fx.fovOffset();
+    if (Math.abs(fov - this.camera.fov) > 0.01) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
     }
 
     this.renderer.render(this.scene, this.camera);

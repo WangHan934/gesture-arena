@@ -30,6 +30,15 @@ const FLASH_CAPACITY = 14;
 /** 光柱池容量 */
 const BEAM_CAPACITY = 4;
 
+/** 投射物池容量 */
+const PROJECTILE_CAPACITY = 8;
+
+/** 冲击波池容量 */
+const SHOCKWAVE_CAPACITY = 8;
+
+/** 闪电池容量 */
+const BOLT_CAPACITY = 4;
+
 /** 闪光贴图：一次性生成的径向渐变，避免依赖外部图片 */
 function makeGlowTexture() {
   const size = 128;
@@ -65,6 +74,11 @@ export class CombatFX {
     this._debris = this._makeDebris();
     this._flashes = this._makeFlashes();
     this._beams = this._makeBeams();
+    this._projectiles = this._makeProjectiles();
+    this._waves = this._makeShockwaves();
+    this._bolts = this._makeBolts();
+    this._bubbles = [];
+    this._embers = this._makeEmbers();
   }
 
   /* ---------------- 火花 ---------------- */
@@ -367,6 +381,346 @@ export class CombatFX {
     for (const ring of [...this._rings.values()]) this.removeRing(ring);
   }
 
+  /* ---------------- 投射物 ---------------- */
+
+  _makeProjectiles() {
+    const geometry = new THREE.SphereGeometry(0.24, 12, 10);
+    const items = [];
+    for (let i = 0; i < PROJECTILE_CAPACITY; i++) {
+      const material = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      this.scene.add(mesh);
+      items.push({
+        mesh,
+        active: false,
+        from: new THREE.Vector3(),
+        to: new THREE.Vector3(),
+        progress: 0,
+        duration: 0.2,
+        color: '#ff8a3d',
+        onArrive: null,
+      });
+    }
+    return { items, cursor: 0 };
+  }
+
+  /**
+   * 发射一颗会飞的能量球，飞到头自动爆开。
+   * 视频里远程技能就是「先飞过去再炸」，比瞬间出现的光束更有打击感。
+   * @param {(point:THREE.Vector3)=>void} [onArrive] 命中回调（用来触发伤害表现）
+   */
+  projectile(from, to, { color = '#ff8a3d', speed = 16, onArrive = null } = {}) {
+    if (!from || !to) return;
+    const pool = this._projectiles;
+    const item = pool.items[pool.cursor];
+    pool.cursor = (pool.cursor + 1) % PROJECTILE_CAPACITY;
+
+    item.from.copy(from);
+    item.to.copy(to);
+    item.mesh.position.copy(from);
+    item.mesh.material.color.set(color);
+    item.mesh.visible = true;
+    item.progress = 0;
+    item.duration = Math.max(0.08, from.distanceTo(to) / Math.max(1, speed));
+    item.color = color;
+    item.onArrive = onArrive;
+    item.active = true;
+
+    this._spawnFlash(from, color, 1.1, 0.16);
+  }
+
+  _updateProjectiles(dt) {
+    for (const item of this._projectiles.items) {
+      if (!item.active) continue;
+
+      item.progress = Math.min(1, item.progress + dt / item.duration);
+      // 稍微走高一点点的弧线，看起来像「扔」而不是「贴地滑」
+      const t = item.progress;
+      item.mesh.position.lerpVectors(item.from, item.to, t);
+      item.mesh.position.y += Math.sin(t * Math.PI) * 0.6;
+
+      // 拖尾：每帧撒一两颗火花
+      this._spawnSparks(item.mesh.position, item.color, 1, 1.2);
+
+      if (item.progress >= 1) {
+        item.active = false;
+        item.mesh.visible = false;
+        const callback = item.onArrive;
+        item.onArrive = null;
+        this.impact(item.to, { color: item.color, heavy: true });
+        callback?.(item.to);
+      }
+    }
+  }
+
+  /* ---------------- 冲击波 ---------------- */
+
+  _makeShockwaves() {
+    const geometry = new THREE.RingGeometry(0.72, 1, 48);
+    const items = [];
+    for (let i = 0; i < SHOCKWAVE_CAPACITY; i++) {
+      const material = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      this.scene.add(mesh);
+      items.push({ mesh, life: 0, maxLife: 0, radius: 3 });
+    }
+    return { items, cursor: 0 };
+  }
+
+  /** 地面上扩散的一圈冲击波：重击 / 落地 / 大招用 */
+  shockwave(position, { color = '#ffd9a0', radius = 3.2, life = 0.5 } = {}) {
+    if (!position) return;
+    const pool = this._waves;
+    const item = pool.items[pool.cursor];
+    pool.cursor = (pool.cursor + 1) % SHOCKWAVE_CAPACITY;
+
+    item.mesh.position.set(position.x, 0.05, position.z);
+    item.mesh.material.color.set(color);
+    item.mesh.material.opacity = 0.85;
+    item.mesh.scale.setScalar(0.2);
+    item.mesh.visible = true;
+    item.radius = radius;
+    item.life = life;
+    item.maxLife = life;
+  }
+
+  _updateShockwaves(dt) {
+    for (const item of this._waves.items) {
+      if (item.life <= 0) continue;
+      item.life -= dt;
+      if (item.life <= 0) {
+        item.mesh.visible = false;
+        continue;
+      }
+      const progress = 1 - item.life / item.maxLife;
+      // 先快后慢地扩散，接近真实冲击波
+      const scale = 0.2 + Math.sqrt(progress) * item.radius;
+      item.mesh.scale.setScalar(scale);
+      item.mesh.material.opacity = 0.85 * (1 - progress) ** 1.4;
+    }
+  }
+
+  /* ---------------- 闪电 ---------------- */
+
+  _makeBolts() {
+    const items = [];
+    const segments = 10;
+    for (let i = 0; i < BOLT_CAPACITY; i++) {
+      const positions = new Float32Array((segments + 1) * 2 * 3);
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const material = new THREE.LineBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 1,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const line = new THREE.LineSegments(geometry, material);
+      line.visible = false;
+      line.frustumCulled = false;
+      this.scene.add(line);
+      items.push({ line, positions, geometry, segments, life: 0, maxLife: 0, from: new THREE.Vector3(), to: new THREE.Vector3(), color: '#cfe4ff' });
+    }
+    return { items, cursor: 0 };
+  }
+
+  /** 从天而降的闪电，落在目标身上 */
+  bolt(target, { color = '#cfe4ff', life = 0.3, height = 9 } = {}) {
+    if (!target) return;
+    const pool = this._bolts;
+    const item = pool.items[pool.cursor];
+    pool.cursor = (pool.cursor + 1) % BOLT_CAPACITY;
+
+    item.from.set(target.x + (Math.random() - 0.5) * 1.4, target.y + height, target.z + (Math.random() - 0.5) * 1.4);
+    item.to.copy(target);
+    item.line.material.color.set(color);
+    item.line.material.opacity = 1;
+    item.line.visible = true;
+    item.life = life;
+    item.maxLife = life;
+    item.color = color;
+    this._shapeBolt(item);
+
+    this._spawnFlash(target, color, 2.4, 0.24);
+    this._spawnSparks(target, color, 18, 5.5);
+    this.shake(0.5);
+  }
+
+  /** 把线段揉成锯齿状。注意 LineSegments 要成对给端点，不能只给节点 */
+  _shapeBolt(item) {
+    const { positions, segments, from, to } = item;
+
+    // 先算出折线节点
+    const points = [];
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      // 越靠中间抖得越厉害，两端固定在起点和目标上
+      const jitter = Math.sin(t * Math.PI) * 0.7;
+      points.push(new THREE.Vector3(
+        from.x + (to.x - from.x) * t + (Math.random() - 0.5) * jitter,
+        from.y + (to.y - from.y) * t,
+        from.z + (to.z - from.z) * t + (Math.random() - 0.5) * jitter,
+      ));
+    }
+
+    let index = 0;
+    for (let i = 0; i < segments; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      positions[index++] = a.x;
+      positions[index++] = a.y;
+      positions[index++] = a.z;
+      positions[index++] = b.x;
+      positions[index++] = b.y;
+      positions[index++] = b.z;
+    }
+    item.geometry.attributes.position.needsUpdate = true;
+  }
+
+  _updateBolts(dt) {
+    for (const item of this._bolts.items) {
+      if (item.life <= 0) continue;
+      item.life -= dt;
+      if (item.life <= 0) {
+        item.line.visible = false;
+        continue;
+      }
+      item.line.material.opacity = item.life / item.maxLife;
+      // 每帧重新抖一次，做出电流闪烁
+      if (Math.random() < 0.6) this._shapeBolt(item);
+    }
+  }
+
+  /* ---------------- 护罩 / 治疗 ---------------- */
+
+  /**
+   * 罩在单位身上的半透明护罩（护盾技能）
+   * @param {THREE.Object3D} anchor 跟随的对象
+   */
+  bubble(anchor, { color = '#9fd8ff', duration = 3.5, radius = 2.4 } = {}) {
+    if (!anchor) return;
+    const geometry = new THREE.SphereGeometry(radius, 20, 16);
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.16,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.y = radius * 0.55;
+    mesh.scale.setScalar(0.2);
+    anchor.add(mesh);
+    this._bubbles.push({ mesh, anchor, life: duration, maxLife: duration, radius });
+    this._spawnFlash(anchor.position.clone().setY(anchor.position.y + radius * 0.6), color, 2.2, 0.3);
+  }
+
+  _updateBubbles(dt) {
+    for (let i = this._bubbles.length - 1; i >= 0; i--) {
+      const bubble = this._bubbles[i];
+      bubble.life -= dt;
+      if (bubble.life <= 0) {
+        bubble.anchor?.remove(bubble.mesh);
+        bubble.mesh.geometry.dispose();
+        bubble.mesh.material.dispose();
+        this._bubbles.splice(i, 1);
+        continue;
+      }
+      const progress = 1 - bubble.life / bubble.maxLife;
+      // 弹出 → 稳定 → 结束前变淡
+      const pop = Math.min(1, progress * 8);
+      bubble.mesh.scale.setScalar(pop * (1 + Math.sin(progress * 12) * 0.02));
+      bubble.mesh.material.opacity = 0.18 * (bubble.life < 0.6 ? bubble.life / 0.6 : 1);
+    }
+  }
+
+  /** 上升的光点：治疗 / 蓄力 */
+  motes(anchor, { color = '#9dffb0', count = 10, radius = 1.1 } = {}) {
+    if (!anchor) return;
+    const base = anchor.position.clone();
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      const point = base.clone().add(new THREE.Vector3(
+        Math.cos(angle) * radius * (0.5 + Math.random() * 0.6),
+        0.2 + Math.random() * 0.4,
+        Math.sin(angle) * radius * (0.5 + Math.random() * 0.6),
+      ));
+      this._spawnSparks(point, color, 2, 1.2);
+    }
+  }
+
+  /* ---------------- 环境火星 ---------------- */
+
+  _makeEmbers() {
+    const count = 70;
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const seeds = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      positions[i * 3] = (Math.random() - 0.5) * 26;
+      positions[i * 3 + 1] = Math.random() * 7;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 26;
+      seeds[i] = Math.random();
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const material = new THREE.PointsMaterial({
+      size: 0.09,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      sizeAttenuation: true,
+    });
+    const points = new THREE.Points(geometry, material);
+    points.frustumCulled = false;
+    this.scene.add(points);
+    return { points, positions, colors, seeds, count, geometry };
+  }
+
+  _updateEmbers(dt, time) {
+    const { positions, colors, seeds, count, geometry } = this._embers;
+    for (let i = 0; i < count; i++) {
+      const i3 = i * 3;
+      // 慢慢上浮，越靠上越淡；飘出顶就从头开始
+      positions[i3 + 1] += (0.25 + seeds[i] * 0.45) * dt;
+      positions[i3] += Math.sin(time * 0.7 + seeds[i] * 9) * 0.16 * dt;
+      if (positions[i3 + 1] > 7.5) {
+        positions[i3 + 1] = 0.1;
+        positions[i3] = (Math.random() - 0.5) * 26;
+        positions[i3 + 2] = (Math.random() - 0.5) * 26;
+      }
+      const fade = 1 - positions[i3 + 1] / 7.5;
+      // 暖橙色余烬，亮度随高度衰减
+      colors[i3] = 1.0 * fade;
+      colors[i3 + 1] = 0.55 * fade;
+      colors[i3 + 2] = 0.22 * fade;
+    }
+    geometry.attributes.position.needsUpdate = true;
+    geometry.attributes.color.needsUpdate = true;
+  }
+
   /* ---------------- 对外接口 ---------------- */
 
   /**
@@ -443,6 +797,16 @@ export class CombatFX {
     this.shakeAmp = Math.min(1, this.shakeAmp + amount);
   }
 
+  /** 镜头推近（FOV 收缩），重击 / 大招时用，会自己弹回 */
+  punch(amount = 1) {
+    this.punchAmp = Math.min(1, (this.punchAmp ?? 0) + amount);
+  }
+
+  /** 当前应该收缩多少度 FOV，调用方自己减到 camera.fov 上 */
+  fovOffset() {
+    return (this.punchAmp ?? 0) * 3.5;
+  }
+
   /**
    * 每帧取一个抖动偏移，调用方加到相机位置上。
    * 用两个不同频率的正弦叠加，比纯随机更像「撞击」而不是「抖动」。
@@ -465,6 +829,11 @@ export class CombatFX {
     this._updateSparks(dt);
     this._updateDebris(dt);
     this._updateFlashes(dt);
+    this._updateProjectiles(dt);
+    this._updateShockwaves(dt);
+    this._updateBolts(dt);
+    this._updateBubbles(dt);
+    this._updateEmbers(dt, time);
 
     for (const item of this._beams.items) {
       if (item.life <= 0) continue;
@@ -487,10 +856,22 @@ export class CombatFX {
     }
 
     this.shakeAmp = Math.max(0, this.shakeAmp - dt * 3.4);
+    this.punchAmp = Math.max(0, (this.punchAmp ?? 0) - dt * 3.2);
   }
 
   dispose() {
     this.clearRings();
+    for (const bubble of this._bubbles) {
+      bubble.anchor?.remove(bubble.mesh);
+      bubble.mesh.geometry.dispose();
+      bubble.mesh.material.dispose();
+    }
+    this._bubbles.length = 0;
+
+    this.scene.remove(this._embers.points);
+    this._embers.geometry.dispose();
+    this._embers.points.material.dispose();
+
     for (const pool of [this._sparks]) {
       this.scene.remove(pool.points);
       pool.geometry.dispose();
@@ -507,6 +888,19 @@ export class CombatFX {
     for (const item of this._beams.items) {
       this.scene.remove(item.mesh);
       item.mesh.material.dispose();
+    }
+    for (const item of this._projectiles.items) {
+      this.scene.remove(item.mesh);
+      item.mesh.material.dispose();
+    }
+    for (const item of this._waves.items) {
+      this.scene.remove(item.mesh);
+      item.mesh.material.dispose();
+    }
+    for (const item of this._bolts.items) {
+      this.scene.remove(item.line);
+      item.geometry.dispose();
+      item.line.material.dispose();
     }
     this._glow.dispose();
   }

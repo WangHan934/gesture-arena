@@ -87,27 +87,28 @@ export class ClassicScene3D {
     this.damage = new DamageTracker();
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#171221');
-    this.scene.fog = new THREE.Fog('#171221', 30, 70);
+    this.scene.background = new THREE.Color('#120d1c');
+    this.scene.fog = new THREE.Fog('#120d1c', 24, 58);
 
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.45;
+    this.renderer.toneMappingExposure = 1.18;
 
     // 打斗特效：命中火花、碎石、能量束、脚底光圈、镜头震动。
     // 注意必须放在 scene 建好之后 —— 它构造时就会往场景里塞粒子池
     this.fx = new CombatFX(this.scene);
     this.time = 0;
     this._camBase = new THREE.Vector3();
+    this._baseFov = this.camera.fov;
 
-    this.scene.add(new THREE.HemisphereLight(0xe2d9ff, 0x4a3241, 2.7));
-    const key = new THREE.DirectionalLight(0xffecd2, 4.2);
+    this.scene.add(new THREE.HemisphereLight(0xcbd6ff, 0x2a1c2e, 1.85));
+    const key = new THREE.DirectionalLight(0xffd9b0, 3.5);
     key.position.set(4, 12, 8);
     this.scene.add(key);
-    const rim = new THREE.DirectionalLight(0x9b85ff, 3);
+    const rim = new THREE.DirectionalLight(0x7f6bff, 4.4);
     rim.position.set(-9, 7, -8);
     this.scene.add(rim);
 
@@ -227,6 +228,12 @@ export class ClassicScene3D {
     this.fx.update(dt, this.time);
     // 震动只改相机位置，不碰朝向，避免画面晃得人晕
     this.camera.position.copy(this._camBase).add(this.fx.shakeOffset(this.time));
+    // 重击时镜头轻轻推近，再自己弹回
+    const fov = this._baseFov - this.fx.fovOffset();
+    if (Math.abs(fov - this.camera.fov) > 0.01) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
 
     this.renderer.render(this.scene, this.camera);
 
@@ -533,6 +540,11 @@ export class ClassicScene3D {
     }
 
     this.fx.impact(point, { color, heavy: big });
+    if (big) {
+      // 重击再加一圈地面冲击波 + 镜头推近，打击感主要来自这两下
+      this.fx.shockwave(point, { color, radius: 2.6, life: 0.45 });
+      this.fx.punch(0.7);
+    }
     if (unit.kind === 'tower') sfx.towerHit();
     else sfx.impact({ heavy: big });
   }

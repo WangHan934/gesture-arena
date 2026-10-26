@@ -238,17 +238,10 @@ function handleEvents() {
   for (const event of drainEvents(battle)) {
     switch (event.type) {
       case 'playerHit':
-        scene?.play(0, event.spell === 'circle' ? 'Attack' : 'Cast');
+        // 出手动作 + 飞行物 + 命中爆点全在 castSpell 里按技能编排
+        scene?.castSpell(0, event.spell);
         scene?.play(1, 'Hit');
         floatText(`-${event.damage}`, 'to-enemy');
-        // 高伤技能是远程的：先打一道能量束，再在对方身上爆开
-        if (event.damage >= 22) {
-          scene?.beam(0, 1);
-          sfx.beam();
-          scene?.impact(1, { heavy: true });
-        } else {
-          scene?.impact(1, { heavy: false });
-        }
         sfx.impact({ heavy: event.damage >= 22 });
         if (battle.hp.enemy <= 0) scene?.die(1);
         break;
@@ -262,16 +255,16 @@ function handleEvents() {
         if (battle.hp.player <= 0) scene?.die(0);
         break;
       case 'heal':
-        scene?.play(0, 'Cast');
+        scene?.castSpell(0, 'two');
         if (event.amount > 0) floatText(`+${event.amount}`, 'heal');
         sfx.cast();
         break;
       case 'shield':
-        scene?.play(0, 'Defend');
+        scene?.castSpell(0, 'square');
         sfx.cast();
         break;
       case 'support':
-        scene?.play(0, 'Cast');
+        scene?.castSpell(0, 'triangle');
         sfx.cast();
         break;
       case 'enemyWindup':

@@ -31,19 +31,19 @@ export class Arena3D {
     this.signature = '';
     this.lastTurns = null;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#171221');
-    this.scene.fog = new THREE.Fog('#171221', 28, 65);
+    this.scene.background = new THREE.Color('#120d1c');
+    this.scene.fog = new THREE.Fog('#120d1c', 22, 55);
     this.camera = new THREE.PerspectiveCamera(43, 1, .1, 150);
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.45;
-    this.scene.add(new THREE.HemisphereLight(0xe2d9ff, 0x4a3241, 2.7));
-    const key = new THREE.DirectionalLight(0xffecd2, 4.2);
+    this.renderer.toneMappingExposure = 1.18;
+    this.scene.add(new THREE.HemisphereLight(0xcbd6ff, 0x2a1c2e, 1.85));
+    const key = new THREE.DirectionalLight(0xffd9b0, 3.5);
     key.position.set(4, 12, 8);
     this.scene.add(key);
-    const rim = new THREE.DirectionalLight(0x9b85ff, 3);
+    const rim = new THREE.DirectionalLight(0x7f6bff, 4.4);
     rim.position.set(-9, 7, -8);
     this.scene.add(rim);
 
@@ -51,6 +51,7 @@ export class Arena3D {
     this.fx = new CombatFX(this.scene);
     this.time = 0;
     this._camBase = new THREE.Vector3();
+    this._baseFov = this.camera.fov;
     this.resize = new ResizeObserver(() => this.fit());
     canvas.addEventListener('webglcontextlost', event => {
       event.preventDefault();
@@ -241,10 +242,9 @@ export class Arena3D {
         const fighter = this.fighters.find(f => f.seat === index);
         const target = this.fighters.find(f => f.seat !== index);
         const skill = actor[2];
-        if (fighter) this.play(fighter, skill === '护盾' ? 'Defend' : skill === '火球术' ? 'Attack' : 'Cast', true);
-        if (target && /造成/.test(log)) {
-          this.play(target, 'Hit', true);
-          this.hitEffect(fighter, target, skill, log);
+        if (fighter) {
+          this.play(fighter, skill === '护盾' ? 'Defend' : skill === '火球术' ? 'Attack' : 'Cast', true);
+          this.skillFx(fighter, target, skill, log);
         }
       }
     }
@@ -256,22 +256,51 @@ export class Arena3D {
   }
 
   /**
-   * 命中表现：远程技能先打一道能量束，再在被打的一方身上爆开。
-   * 伤害数值从战报里读 —— 服务端已经算好了，前端不再重复计算。
+   * 技能动作编排。PvP 的伤害和技能名都在服务端算好了，
+   * 这里只从战报里读，不重复计算。
+   * 视频里是「抬手 → 飞过去 → 炸开」，所以远程技能一律先出飞行物。
    */
-  hitEffect(actor, target, skill, log) {
-    if (!target) return;
-    const point = this.bodyPoint(target);
+  skillFx(actor, target, skill, log) {
+    const from = actor ? this.bodyPoint(actor) : null;
+    const to = target ? this.bodyPoint(target) : null;
+    const actorColor = ELEMENT_COLOR[actor?.id] ?? '#ffb45a';
+
+    // 没有伤害的技能：护盾 / 治疗 / 援军
+    if (!/造成/.test(log)) {
+      if (!actor) return;
+      if (skill === '护盾') this.fx.bubble(actor.root, { color: '#9fd8ff', duration: 3.5, radius: 2.6 });
+      else if (skill === '治愈之光') this.fx.motes(actor.root, { color: '#9dffb0', count: 12, radius: 1.4 });
+      else this.fx.motes(actor.root, { color: '#ffe08a', count: 10, radius: 1.3 });
+      return;
+    }
+
+    if (!target || !to) return;
     const color = target.color ?? '#ffb45a';
     const damage = Number((/造成 (\d+) 点伤害/.exec(log) || [])[1] || 0);
     const heavy = damage >= 20;
 
-    if (actor && RANGED_SKILLS.has(skill)) {
-      this.fx.beam(this.bodyPoint(actor), point, { color: ELEMENT_COLOR[actor.id] ?? color });
-      sfx.beam();
+    this.play(target, 'Hit', true);
+
+    switch (skill) {
+      case '火球术':
+        if (from) this.fx.projectile(from, to, { color: actorColor, speed: 18 });
+        sfx.beam();
+        break;
+      case '雷霆万钧':
+        this.fx.bolt(to, { color: actorColor });
+        this.fx.punch(0.7);
+        break;
+      case '终极奥义':
+        if (from) this.fx.beam(from, to, { color: actorColor, radius: 2.2 });
+        this.fx.shockwave(to, { color, radius: 3.4, life: 0.6 });
+        this.fx.punch(1);
+        break;
+      default:
+        if (from && RANGED_SKILLS.has(skill)) this.fx.beam(from, to, { color: actorColor });
+        break;
     }
 
-    this.fx.impact(point, { color, heavy });
+    this.fx.impact(to, { color, heavy });
     sfx.impact({ heavy });
   }
 
@@ -299,6 +328,11 @@ export class Arena3D {
     this.fx.update(dt, this.time);
     if (this._camBase.lengthSq() > 0) {
       this.camera.position.copy(this._camBase).add(this.fx.shakeOffset(this.time));
+    }
+    const fov = this._baseFov - this.fx.fovOffset();
+    if (Math.abs(fov - this.camera.fov) > 0.01) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
     }
 
     this.renderer.render(this.scene, this.camera);
