@@ -113,8 +113,13 @@ export class SoloScene {
   async load() {
     this.onStatus?.('loading', '正在加载竞技场与怪兽…');
     const loader = new GLTFLoader();
-    const results = await Promise.allSettled(Object.entries(URLS).map(async ([id, url]) => {
+    const entries = Object.entries(URLS);
+    let done = 0;
+    // 下完一份报一次进度，别让人盯着不动的文案等
+    const results = await Promise.allSettled(entries.map(async ([id, url]) => {
       const gltf = await loader.loadAsync(url);
+      done += 1;
+      this.onStatus?.('loading', `正在加载模型 ${done}/${entries.length}…`);
       return [id, gltf];
     }));
     const failed = [];

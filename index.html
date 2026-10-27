@@ -5,6 +5,11 @@
 <title>空绘兽斗 · 怪兽 PvP</title>
 <meta name="description" content="两台设备，同一间竞技场。画符号施法的实时怪兽 PvP。">
 <link rel="icon" href="assets/selection-sigil.svg"><link rel="stylesheet" href="src/ui/pvp.css"><link rel="stylesheet" href="src/ui/selection.css">
+<!-- importmap 要在任何模块脚本 / modulepreload 之前，否则 three 这个裸模块名解析不了 -->
+<script type="importmap">{"imports":{"three":"./vendor/three/lib/three.module.js"}}</script>
+<!-- 预加载：three 和入口脚本一共 2MB 多，让浏览器在解析 HTML 时就开始下，别等到 body 末尾 -->
+<link rel="modulepreload" href="vendor/three/lib/three.module.js">
+<link rel="modulepreload" href="src/main.js">
 </head>
 <body class="selecting">
 <header class="topbar" id="game-topbar" hidden><a class="brand" href="/">空绘<span>兽斗</span><small>GESTURE ARENA</small></a><span class="connection" id="connection">双人联网 · 回合对战</span></header>
@@ -38,6 +43,5 @@
 <div class="file-warning" id="file-warning" hidden>请运行 <code>npm start</code> 后打开服务器地址。双击 HTML 无法进行联网对战。</div>
 </main><footer id="game-footer" hidden>空绘兽斗 <span>·</span> 同一房间，公平出招。 <span>·</span> 双方生命与技能数值一致，怪兽外观自由选择。</footer>
 <script>if(location.protocol==='file:')document.getElementById('file-warning').hidden=false;</script>
-<script type="importmap">{"imports":{"three":"./vendor/three/lib/three.module.js"}}</script>
 <script type="module" src="src/main.js"></script>
 </body></html>

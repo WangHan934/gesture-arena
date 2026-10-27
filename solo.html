@@ -7,6 +7,11 @@
 <link rel="icon" href="assets/selection-sigil.svg">
 <link rel="stylesheet" href="src/ui/pvp.css">
 <link rel="stylesheet" href="src/solo/solo.css">
+<!-- importmap 要在任何模块脚本 / modulepreload 之前，否则 three 这个裸模块名解析不了 -->
+<script type="importmap">{"imports":{"three":"./vendor/three/lib/three.module.js"}}</script>
+<!-- 预加载：three 和入口脚本一共 2MB 多，让浏览器在解析 HTML 时就开始下 -->
+<link rel="modulepreload" href="vendor/three/lib/three.module.js">
+<link rel="modulepreload" href="src/solo/main.js">
 </head>
 <body class="solo">
 <header class="topbar">
@@ -76,6 +81,5 @@
 </main>
 
 <p id="feedback" role="status" aria-live="polite"></p>
-<script type="importmap">{"imports":{"three":"./vendor/three/lib/three.module.js"}}</script>
 <script type="module" src="src/solo/main.js"></script>
 </body></html>

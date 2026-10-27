@@ -7,6 +7,11 @@
   <meta name="description" content="单机版：画手势召唤生物拆塔，或 1v1 决斗走位对拼。不需要联网、不需要对手。" />
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
   <link rel="stylesheet" href="src/ui/style.css" />
+  <!-- importmap 要在任何模块脚本 / modulepreload 之前，否则 three 这个裸模块名解析不了 -->
+  <script type="importmap">{"imports":{"three":"./vendor/three/lib/three.module.js"}}</script>
+  <!-- 预加载：three 和入口脚本一共 2MB 多，让浏览器在解析 HTML 时就开始下 -->
+  <link rel="modulepreload" href="vendor/three/lib/three.module.js">
+  <link rel="modulepreload" href="src/main-classic.js">
 </head>
 <body>
   <div class="app">
@@ -124,7 +129,6 @@
       document.getElementById('file-warning').classList.add('show');
     }
   </script>
-  <script type="importmap">{"imports":{"three":"./vendor/three/lib/three.module.js"}}</script>
   <script type="module" src="src/main-classic.js"></script>
 </body>
 </html>

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomInt } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
+import { gzipSync, brotliCompressSync, constants as ZLIB } from 'node:zlib';
 import { createBattle, castSpell, expireTurn, validMonster } from './src/pvp/engine.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -84,6 +85,85 @@ function isParseableOrigin(origin) {
 }
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.wasm': 'application/wasm', '.task': 'application/octet-stream', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json' };
+
+/* ---------------- 静态资源：预压缩 + 内存缓存 + 304 ----------------
+ *
+ * 【为什么要自己压】
+ *   线上网关不做压缩（实测响应里没有 Content-Encoding），而这个项目的首屏要拉
+ *   three.core.js 1.5MB + 四个 GLB 2.8MB ≈ 5.2MB 明文。GLB 里没有贴图，
+ *   全是顶点/骨骼的浮点数组，压缩率特别好：整体能压到 19% 左右，也就是 1MB 出头。
+ *   手机上 4G 从 40 秒降到 8 秒，这是「加载很慢」最大的那一刀。
+ *
+ * 【为什么预压缩 + 缓存】
+ *   原来每个请求都 readFile 一遍，压缩再放进去的话每次请求都要吃一次 CPU。
+ *   这里按「路径 + mtime + 大小」缓存明文和两种压缩结果，文件一改缓存自动失效。
+ *
+ * 【为什么给 vendor / assets 长缓存】
+ *   这两个目录是第三方库和模型，跟着发版才会变；给一天缓存，回访基本零下载。
+ *   src/ 和 html 用 no-cache + ETag：每次回来问一句「变了吗」，没变就 304 空响应，
+ *   改完代码刷新立刻生效，不会出现「用户还跑着旧代码」。
+ */
+const fileCache = new Map();
+const CACHE_BUDGET = 64 * 1024 * 1024;
+let cacheBytes = 0;
+
+/** 这些后缀值得压；图片本身已压缩，压了反而更大 */
+const COMPRESSIBLE = new Set(['.html', '.js', '.mjs', '.css', '.svg', '.json', '.glb', '.gltf', '.wasm', '.task']);
+/** 太小就别压了，省下的字节还不如多出来的头 */
+const COMPRESS_MIN = 1024;
+
+async function loadStatic(file, ext) {
+  const info = await stat(file);
+  const cached = fileCache.get(file);
+  if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) return cached;
+
+  const raw = await readFile(file);
+  const entry = {
+    mtimeMs: info.mtimeMs,
+    size: info.size,
+    raw,
+    gzip: null,
+    br: null,
+    etag: `W/"${info.size.toString(16)}-${Math.round(info.mtimeMs).toString(16)}"`,
+    compressible: COMPRESSIBLE.has(ext) && raw.length >= COMPRESS_MIN,
+  };
+
+  if (cached) cacheBytes -= cached.raw.length;
+  else if (cacheBytes + raw.length > CACHE_BUDGET) {
+    // 预算满了就整体清空重建，比维护 LRU 简单，而且这个项目的文件总数是固定的
+    fileCache.clear();
+    cacheBytes = 0;
+  }
+  fileCache.set(file, entry);
+  cacheBytes += raw.length;
+  return entry;
+}
+
+/** 按 Accept-Encoding 挑压缩方式，优先 brotli */
+function pickEncoding(req, entry) {
+  if (!entry.compressible) return null;
+  const accept = String(req.headers['accept-encoding'] || '');
+  if (/\bbr\b/.test(accept)) return 'br';
+  if (/\bgzip\b/.test(accept)) return 'gzip';
+  return null;
+}
+
+function encodedBody(entry, encoding) {
+  if (encoding === 'br') {
+    // 质量 5：比 gzip 再小 15%，压缩耗时又只有质量 11 的零头（而且只算一次）
+    return entry.br ??= brotliCompressSync(entry.raw, {
+      params: { [ZLIB.BROTLI_PARAM_QUALITY]: 5, [ZLIB.BROTLI_PARAM_SIZE_HINT]: entry.raw.length },
+    });
+  }
+  if (encoding === 'gzip') return entry.gzip ??= gzipSync(entry.raw, { level: 6 });
+  return entry.raw;
+}
+
+function cacheControlFor(relative) {
+  if (/\.html$/.test(relative)) return 'no-cache';
+  if (relative.startsWith('vendor/') || relative.startsWith('assets/')) return 'public, max-age=86400';
+  return 'no-cache';
+}
 
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -186,9 +266,32 @@ export const server = http.createServer(async (req, res) => {
     if (!/^(?:index|classic|solo)\.html$|^(?:src|vendor|assets|art\/renders)\/[^\0]+$/.test(relative) || relative.split('/').some(part => part.startsWith('.'))) return json(res, 404, { message: '文件不存在' });
     const file = path.resolve(ROOT, relative);
     if (!file.startsWith(ROOT + path.sep) || !(await stat(file)).isFile()) return json(res, 404, { message: '文件不存在' });
-    const bytes = await readFile(file);
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' });
-    res.end(req.method === 'HEAD' ? undefined : bytes);
+
+    const ext = path.extname(file);
+    const entry = await loadStatic(file, ext);
+    const encoding = pickEncoding(req, entry);
+    const etag = encoding ? `${entry.etag.slice(0, -1)}-${encoding}"` : entry.etag;
+
+    const headers = {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': cacheControlFor(relative),
+      'ETag': etag,
+      // 同一个 URL 有两种压缩版本，必须告诉缓存层
+      'Vary': 'Accept-Encoding',
+    };
+
+    // 没变就只回一个空 304：回访时整页脚本、模型都不用重下
+    if (req.headers['if-none-match'] === etag) {
+      res.writeHead(304, headers);
+      return res.end();
+    }
+
+    const payload = encodedBody(entry, encoding);
+    if (encoding) headers['Content-Encoding'] = encoding;
+    headers['Content-Length'] = payload.length;
+    res.writeHead(200, headers);
+    res.end(req.method === 'HEAD' ? undefined : payload);
   } catch (error) {
     if (res.headersSent) return res.end();
     json(res, error.code === 'ENOENT' ? 404 : 400, { message: error.code === 'ENOENT' ? '文件不存在' : '请求无效，请重试' });

@@ -154,45 +154,37 @@ export class ClassicScene3D {
   async load() {
     this.onStatus('loading', '正在加载竞技场与怪兽模型…');
     const loader = new GLTFLoader();
-    const entries = Object.entries(URLS);
-
-    const results = await Promise.allSettled(
-      entries.map(async ([id, url]) => [id, await loader.loadAsync(url)]),
-    );
-
     const failed = [];
-    for (const [i, result] of results.entries()) {
-      if (result.status === 'fulfilled') {
-        const [id, gltf] = result.value;
-        this.templates[id] = gltf;
-      } else {
-        failed.push(entries[i][0]);
-        console.error(`[3D] 加载失败 ${entries[i][1]}`, result.reason);
-      }
-    }
 
-    if (this.templates.arena) {
-      this.arena = this.templates.arena.scene;
-      // 场地放大：整组缩放，出生点跟着一起放大，相对位置不变
-      this.arena.scale.setScalar(ARENA_SCALE);
-      this.scene.add(this.arena);
-    }
+    // 场地先到先摆：主循环一直在跑，场地一进场景就把 loaded 置真，
+    // 玩家先看到竞技场和布景，不用等四只怪全部下完才亮屏（766K 那份是最大的一块）
+    const arenaTask = loader.loadAsync(URLS.arena).then((gltf) => {
+      this.templates.arena = gltf;
+      this._installArena();
+    }).catch((error) => {
+      failed.push('arena');
+      console.error(`[3D] 加载失败 ${URLS.arena}`, error);
+    });
 
-    // 竞技场里带命名的出生点，两个单位沿这两个点对峙
-    this.spawnA = this._spawn('Arena_Spawn_A_Player', new THREE.Vector3(0, 0.25, 5.5));
-    this.spawnB = this._spawn('Arena_Spawn_B_Enemy', new THREE.Vector3(0, 0.25, -5.5));
+    // 三只怪并行下，下完一只报一次进度
+    const monsters = Object.entries(URLS).filter(([id]) => id !== 'arena');
+    let done = 0;
+    const results = await Promise.allSettled(monsters.map(async ([id, url]) => {
+      const gltf = await loader.loadAsync(url);
+      this.templates[id] = gltf;
+      done += 1;
+      this.onStatus('loading', `正在加载怪兽 ${done}/${monsters.length}…`);
+      return id;
+    }));
+    results.forEach((result, i) => {
+      if (result.status !== 'rejected') return;
+      failed.push(monsters[i][0]);
+      console.error(`[3D] 加载失败 ${monsters[i][1]}`, result.reason);
+    });
 
-    // 布景要等出生点算完才能定半径
-    if (this.arena) {
-      this.arenaRadius = this._arenaRadius();
-      this.dressing = new ArenaDressing(this.scene, {
-        radius: this.arenaRadius,
-        torchCount: 10,
-        bannerCount: 6,
-        lightTorches: 2,
-      });
-    }
-
+    await arenaTask;
+    // 场地没加载成功时也要能跑：出生点和半径走兜底值
+    this._prepare();
     this.loaded = true;
     this.fit();
     this._frameCamera();
@@ -203,6 +195,35 @@ export class ClassicScene3D {
     }
     this.onStatus('ready', '竞技场与怪兽模型已加载');
     return true;
+  }
+
+  /** 把场地、出生点、布景装进场景，并让渲染立刻可以开始 */
+  _installArena() {
+    if (!this.templates.arena) return;
+    this.arena = this.templates.arena.scene;
+    // 场地放大：整组缩放，出生点跟着一起放大，相对位置不变
+    this.arena.scale.setScalar(ARENA_SCALE);
+    this.scene.add(this.arena);
+    this._prepare();
+    // 布景要等出生点算完才能定半径
+    this.dressing = new ArenaDressing(this.scene, {
+      radius: this.arenaRadius,
+      torchCount: 10,
+      bannerCount: 6,
+      lightTorches: 2,
+    });
+    // 场地到位就开画：怪兽还在路上，先让玩家看见竞技场
+    this.loaded = true;
+    this.fit();
+    this._frameCamera();
+  }
+
+  /** 出生点 + 场地半径，有场地用命名节点，没有就用兜底坐标 */
+  _prepare() {
+    // 竞技场里带命名的出生点，两个单位沿这两个点对峙
+    this.spawnA ??= this._spawn('Arena_Spawn_A_Player', new THREE.Vector3(0, 0.25, 5.5));
+    this.spawnB ??= this._spawn('Arena_Spawn_B_Enemy', new THREE.Vector3(0, 0.25, -5.5));
+    this.arenaRadius ??= this._arenaRadius();
   }
 
   _spawn(name, fallback) {
