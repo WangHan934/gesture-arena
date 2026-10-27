@@ -242,8 +242,11 @@ export class Arena3D {
       this.camera.position.set(r * 1.1, r * 0.72, r * 1.1);
       this.camera.lookAt(0, 1.3, 0);
     } else {
-      this.camera.position.set(0, 13.5, 23);
-      this.camera.lookAt(0, 1.3, 0);
+      // 选怪 / 大厅：三只怪兽排一排展示。
+      // 视线抬到 3.2（怪兽身高 5.8 的一半）而不是 1.3，
+      // 否则整排会被画面下沿切掉一截
+      this.camera.position.set(0, 12.5, 24);
+      this.camera.lookAt(0, 3.2, 0);
     }
     this._camBase.copy(this.camera.position);
     this.fit();
