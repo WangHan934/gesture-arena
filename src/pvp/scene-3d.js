@@ -5,6 +5,7 @@ import { clone } from '../../vendor/three/examples/jsm/utils/SkeletonUtils.js';
 import { CombatFX } from '../fx/combat-fx.js';
 import { sfx } from '../audio/sfx.js';
 import { ArenaDressing } from '../fx/arena-dressing.js';
+import { HealthBarLayer, BAR_GAP } from '../fx/health-bar.js';
 
 const URLS = {
   fire: new URL('../../assets/models/fire.glb', import.meta.url).href,
@@ -60,6 +61,8 @@ export class Arena3D {
 
     // 打斗特效（火花 / 碎石 / 能量束 / 光圈 / 震动）。必须在 scene 建好之后
     this.fx = new CombatFX(this.scene);
+    // 头顶血条（和单机共用同一层）。血量来自 state.players[].hp，不在前端算
+    this.bars = new HealthBarLayer(this.scene);
     this.time = 0;
     this._camBase = new THREE.Vector3();
     this._baseFov = this.camera.fov;
@@ -212,6 +215,7 @@ export class Arena3D {
       this.scene.remove(fighter.root);
     }
     this.fighters = [];
+    this.bars.clear();
     this.canvas.dataset.view = battle ? 'battle' : state ? 'lobby' : 'selection';
     this.canvas.setAttribute('aria-label', battle ? '双方选中怪兽的 3D 对战与原始竞技场' : state ? '三个原始 3D 怪兽和竞技场' : `${MONSTERS.find(m => m.id === this.selectedMonster).name}与原始竞技场`);
     this.canvas.dataset.selectedMonster = this.selectedMonster;
@@ -233,6 +237,7 @@ export class Arena3D {
         model.root.rotation.y = i === seat ? Math.PI : 0;
         model.seat = i;
         model.color = ELEMENT_COLOR[id] ?? '#ffb45a';
+        model.maxHp = MONSTERS.find(m => m.id === id)?.hp ?? 140;
         this.scene.add(model.root);
         this.fighters.push(model);
         model.ring = this.fx.addRing(model.root, model.color, 1.7);
@@ -352,10 +357,33 @@ export class Arena3D {
     return point;
   }
 
+  /** 头顶血条：座位 → 血量。数据全来自服务端下发的 state，前端不重算 */
+  syncBars() {
+    if (!this.state?.battle) {
+      this.bars.clear();
+      return;
+    }
+    for (const fighter of this.fighters) {
+      const player = this.state.players?.[fighter.seat];
+      const point = fighter.root.position;
+      this.bars.set(`seat${fighter.seat}`, {
+        hp: player?.hp ?? 0,
+        maxHp: fighter.maxHp ?? 140,
+        side: fighter.seat === this.seat ? 'player' : 'enemy',
+        x: point.x,
+        y: point.y + fighter.height + BAR_GAP,
+        z: point.z,
+        width: 1.6,
+        visible: !fighter.dead,
+      });
+    }
+  }
+
   update(dt) {
     if (this.lost) return;
     this.setState(this.state, this.seat);
     this.animateBattle();
+    this.syncBars();
     for (const model of [...this.gallery, ...this.fighters]) {
       if (!model.root.visible) continue;
       model.mixer.update(dt);
@@ -367,6 +395,7 @@ export class Arena3D {
 
     this.time += dt;
     this.fx.update(dt, this.time);
+    this.bars.update(dt);
     this.dressing?.update(dt, this.time);
     if (this._camBase.lengthSq() > 0) {
       this.camera.position.copy(this._camBase).add(this.fx.shakeOffset(this.time));

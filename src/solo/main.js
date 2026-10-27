@@ -409,6 +409,8 @@ function frame(now) {
   previous = now;
 
   if (started && battle) {
+    // 血条：只把比例交给 3D 层，数值仍然只有 engine.js 一个来源
+    scene.setHealth([battle.hp.player / battle.max.player, battle.hp.enemy / battle.max.enemy]);
     if (battle.winner === null && !document.hidden) {
       tick(battle, dt);
       handleEvents();

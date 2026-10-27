@@ -13,6 +13,7 @@ import { GLTFLoader } from '../../vendor/three/examples/jsm/loaders/GLTFLoader.j
 import { clone } from '../../vendor/three/examples/jsm/utils/SkeletonUtils.js';
 import { CombatFX } from '../fx/combat-fx.js';
 import { ArenaDressing } from '../fx/arena-dressing.js';
+import { HealthBarLayer, BAR_GAP } from '../fx/health-bar.js';
 
 const URLS = {
   fire: new URL('../../assets/models/fire.glb', import.meta.url).href,
@@ -25,6 +26,9 @@ const IDS = ['fire', 'shadow', 'rock'];
 
 /** 三只怪兽的属性和特效颜色（和 PvP 的怪兽表一致） */
 const ELEMENT_COLOR = { fire: '#ff8a3d', shadow: '#b388ff', rock: '#9fd8ff' };
+
+/** 战斗时怪兽身高，血条按它算头顶位置 */
+const FIGHTER_HEIGHT = 4.1;
 
 /** 技能 id → 手势符号，用来在角色身前勾出这次的招式 */
 const SYMBOL_OF = {
@@ -81,6 +85,9 @@ export class SoloScene {
 
     // 打斗特效：命中火花、碎石、能量束、脚底光圈、镜头震动
     this.fx = new CombatFX(this.scene);
+    // 头顶血条（共享层）。血量由 main.js 每帧塞进来，这里只管画
+    this.bars = new HealthBarLayer(this.scene);
+    this.health = null;
     this.time = 0;
     this._camBase = new THREE.Vector3();
     this._baseFov = this.camera.fov;
@@ -203,7 +210,7 @@ export class SoloScene {
       { id: enemyId, spawn: 'Arena_Spawn_B_Enemy', facing: -Math.PI * 0.11, fallback: [0, 0, -5.5] },
     ];
     layout.forEach((slot, seat) => {
-      const model = this.build(slot.id, 4.1);
+      const model = this.build(slot.id, FIGHTER_HEIGHT);
       if (!model) return;
       const anchor = this.arena?.getObjectByName(slot.spawn);
       const position = anchor
@@ -236,6 +243,38 @@ export class SoloScene {
       this.scene.remove(fighter.root);
     }
     this.fighters = [];
+    this.bars.clear();
+    this.health = null;
+  }
+
+  /**
+   * 血条数据：main.js 每帧把双方剩余血量比例传进来。
+   * 规则全在 engine.js，这里不做任何计算。
+   * @param {number[]} ratios [我方, 敌方]，0~1
+   */
+  setHealth(ratios) {
+    this.health = ratios;
+  }
+
+  /** 血条跟着单位走（前冲 / 后仰会改 root.position） */
+  _syncBars() {
+    for (const fighter of this.fighters) {
+      const ratio = this.health?.[fighter.seat];
+      if (ratio === undefined || ratio === null) {
+        this.bars.remove(`seat${fighter.seat}`);
+        continue;
+      }
+      const p = fighter.root.position;
+      this.bars.set(`seat${fighter.seat}`, {
+        ratio,
+        side: fighter.seat === 0 ? 'player' : 'enemy',
+        x: p.x,
+        y: p.y + FIGHTER_HEIGHT + BAR_GAP,
+        z: p.z,
+        width: 1.6,
+        visible: !fighter.dead || ratio > 0,
+      });
+    }
   }
 
   playModel(model, name, once = false) {
@@ -412,6 +451,8 @@ export class SoloScene {
 
     this.time += dt;
     this.fx.update(dt, this.time);
+    this._syncBars();
+    this.bars.update(dt);
     this.dressing?.update(dt, this.time);
     // 震动只改相机位置，不碰朝向；相机还没摆过（选怪前）就跳过
     if (this._camBase.lengthSq() > 0) {

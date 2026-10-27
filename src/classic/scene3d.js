@@ -34,6 +34,7 @@ import { DamageTracker } from './damage-tracker.js';
 import { FloatingNumbers } from './floaters.js';
 import { CombatFX } from '../fx/combat-fx.js';
 import { ArenaDressing } from '../fx/arena-dressing.js';
+import { HealthBarLayer, BAR_GAP } from '../fx/health-bar.js';
 import { sfx } from '../audio/sfx.js';
 
 /** 旧生物 id → 3D 模型 id */
@@ -116,6 +117,8 @@ export class ClassicScene3D {
     // 打斗特效：命中火花、碎石、能量束、脚底光圈、镜头震动。
     // 注意必须放在 scene 建好之后 —— 它构造时就会往场景里塞粒子池
     this.fx = new CombatFX(this.scene);
+    // 头顶血条：和特效一样属于共享层，位置由每帧的 _syncBar 推
+    this.bars = new HealthBarLayer(this.scene);
     this.time = 0;
     this._camBase = new THREE.Vector3();
     this._baseFov = this.camera.fov;
@@ -274,6 +277,7 @@ export class ClassicScene3D {
 
     this.time += dt;
     this.fx.update(dt, this.time);
+    this.bars.update(dt);
     this.dressing?.update(dt, this.time);
     // 震动只改相机位置，不碰朝向，避免画面晃得人晕
     this.camera.position.copy(this._camBase).add(this.fx.shakeOffset(this.time));
@@ -325,6 +329,7 @@ export class ClassicScene3D {
       unit.model.root.scale.setScalar(unit.baseScale * (0.35 + 0.65 * pop));
 
       this._noteDamage(unit, creature.side, creature.hp, creature.maxHp);
+      this._syncBar(unit, creature.side, creature.hp, creature.maxHp);
     }
 
     this._retireMissing(seen);
@@ -376,6 +381,7 @@ export class ClassicScene3D {
     unit.root.position.copy(this._lanePoint(t, TOWER_LANE_SCALE));
 
     this._noteDamage(unit, unit.side, tower.hp, tower.maxHp);
+    this._syncBar(unit, unit.side, tower.hp, tower.maxHp);
   }
 
   /* ---------------- 决斗 ---------------- */
@@ -421,6 +427,27 @@ export class ClassicScene3D {
     unit.model.root.scale.setScalar(unit.baseScale);
 
     this._noteDamage(unit, fighter.side, fighter.hp, fighter.maxHp);
+    this._syncBar(unit, fighter.side, fighter.hp, fighter.maxHp);
+  }
+
+  /** 血条跟着单位走：位置 = 脚下坐标 + 身高 + 一点空隙 */
+  _syncBar(unit, side, hp, maxHp) {
+    if (!unit) return;
+    if (unit.retiring > 0) {
+      this.bars.remove(unit.key);
+      return;
+    }
+    const p = unit.root.position;
+    this.bars.set(unit.key, {
+      hp,
+      maxHp,
+      side: side === 'player' ? 'player' : 'enemy',
+      x: p.x,
+      y: p.y + (unit.headY ?? 2.4) + BAR_GAP,
+      z: p.z,
+      // 塔比生物高一头，血条也给宽一点
+      width: unit.kind === 'tower' ? 1.6 : 1.25,
+    });
   }
 
   /* ---------------- 摆位 ---------------- */
@@ -565,6 +592,7 @@ export class ClassicScene3D {
       if (unit.kind === 'tower' || unit.retiring > 0) continue;
       if (seen.has(key)) continue;
       unit.retiring = RETIRE_TIME;
+      this.bars.remove(key);
       if (unit.model) this._play(unit.model, 'Death', true);
       // 倒下瞬间来一发爆点，比单纯播动画有打击感
       this.fx.impact(this._bodyPoint(unit), { color: unit.color ?? '#ffb45a', heavy: true });
@@ -703,6 +731,7 @@ export class ClassicScene3D {
       unit.model.mixer.uncacheRoot(unit.model.object);
     }
     this.fx.removeRing(unit.ring);
+    this.bars.remove(key);
     this.scene.remove(unit.root);
     this.units.delete(key);
     this.damage.forget(key); // 记录跟着单位一起走，否则打一局会攒下几百条
@@ -711,12 +740,14 @@ export class ClassicScene3D {
   _clearUnits() {
     for (const key of [...this.units.keys()]) this._removeUnit(key);
     this.damage.clear();
+    this.bars.clear();
     this.floaters?.clear();
   }
 
   destroy() {
     this._clearUnits();
     this.fx.dispose();
+    this.bars.dispose();
     this.dressing?.dispose();
     this.resize.disconnect();
     this.renderer.dispose();
