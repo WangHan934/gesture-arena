@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from '../../vendor/three/examples/jsm/loaders/GLTFLoader.js';
 import { clone } from '../../vendor/three/examples/jsm/utils/SkeletonUtils.js';
 import { CombatFX } from '../fx/combat-fx.js';
+import { ArenaDressing } from '../fx/arena-dressing.js';
 
 const URLS = {
   fire: new URL('../../assets/models/fire.glb', import.meta.url).href,
@@ -121,8 +122,20 @@ export class SoloScene {
     });
     if (this.templates.arena) {
       this.arena = this.templates.arena.scene;
+      // 场地放大 1.3 倍，出生点跟着放大，相对位置不变
+      this.arena.scale.setScalar(1.3);
       this.scene.add(this.arena);
     }
+    // 布景：火把石柱、红旗、地面同心光环、远山、星空。
+    // 半径按两个出生点的间距算，不能量包围盒（那个模型带外圈城墙，会大得离谱）
+    if (this.arena) {
+      const a = this.arena.getObjectByName('Arena_Spawn_A_Player');
+      const b = this.arena.getObjectByName('Arena_Spawn_B_Enemy');
+      const span = a && b ? a.getWorldPosition(new THREE.Vector3()).distanceTo(b.getWorldPosition(new THREE.Vector3())) : 14;
+      this.arenaRadius = Math.max(6, span * 1.25);
+      this.dressing = new ArenaDressing(this.scene, { radius: this.arenaRadius, torchCount: 10, bannerCount: 6, lightTorches: 2 });
+    }
+
     this.loaded = true;
     if (failed.length) {
       this.onStatus?.('error', `模型加载失败：${failed.join('、')}，请检查 assets/models/`);
@@ -208,8 +221,10 @@ export class SoloScene {
       model.ring = this.fx.addRing(model.root, model.color, 1.7);
       this.playModel(model, 'Idle');
     });
-    this.camera.position.set(15.5, 7.6, 13.5);
-    this.camera.lookAt(0, 2.1, 0);
+    // 等距 45° 俯视，距离跟着场地半径走
+    const r = this.arenaRadius ?? 18;
+    this.camera.position.set(r * 1.1, r * 0.72, r * 1.1);
+    this.camera.lookAt(0, 1.6, 0);
     this._camBase.copy(this.camera.position);
   }
 
@@ -397,6 +412,7 @@ export class SoloScene {
 
     this.time += dt;
     this.fx.update(dt, this.time);
+    this.dressing?.update(dt, this.time);
     // 震动只改相机位置，不碰朝向；相机还没摆过（选怪前）就跳过
     if (this._camBase.lengthSq() > 0) {
       this.camera.position.copy(this._camBase).add(this.fx.shakeOffset(this.time));

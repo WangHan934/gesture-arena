@@ -33,6 +33,7 @@ import { WORLD } from '../config.js';
 import { DamageTracker } from './damage-tracker.js';
 import { FloatingNumbers } from './floaters.js';
 import { CombatFX } from '../fx/combat-fx.js';
+import { ArenaDressing } from '../fx/arena-dressing.js';
 import { sfx } from '../audio/sfx.js';
 
 /** 旧生物 id → 3D 模型 id */
@@ -51,10 +52,13 @@ const URLS = {
 const RETIRE_TIME = 0.45;
 
 /** 推进路线相对两个出生点的拉伸倍数，让两端的塔站到场地边缘 */
-const LANE_SCALE = 1.32;
+/** 场地整体放大倍率：出生点、布景、相机都跟着它走 */
+const ARENA_SCALE = 1.3;
+
+const LANE_SCALE = 1.15;
 
 /** 水晶塔比生物再往外拉一点，站到竞技场边缘 */
-const TOWER_LANE_SCALE = 1.58;
+const TOWER_LANE_SCALE = 1.22;
 
 /** 决斗里敌人固定在路线的这个位置（0 = 我方端，1 = 敌方端） */
 const DUEL_ENEMY_T = 0.68;
@@ -166,12 +170,25 @@ export class ClassicScene3D {
 
     if (this.templates.arena) {
       this.arena = this.templates.arena.scene;
+      // 场地放大：整组缩放，出生点跟着一起放大，相对位置不变
+      this.arena.scale.setScalar(ARENA_SCALE);
       this.scene.add(this.arena);
     }
 
     // 竞技场里带命名的出生点，两个单位沿这两个点对峙
     this.spawnA = this._spawn('Arena_Spawn_A_Player', new THREE.Vector3(0, 0.25, 5.5));
     this.spawnB = this._spawn('Arena_Spawn_B_Enemy', new THREE.Vector3(0, 0.25, -5.5));
+
+    // 布景要等出生点算完才能定半径
+    if (this.arena) {
+      this.arenaRadius = this._arenaRadius();
+      this.dressing = new ArenaDressing(this.scene, {
+        radius: this.arenaRadius,
+        torchCount: 10,
+        bannerCount: 6,
+        lightTorches: 2,
+      });
+    }
 
     this.loaded = true;
     this.fit();
@@ -193,6 +210,18 @@ export class ClassicScene3D {
     return pos;
   }
 
+  /**
+   * 场地半径。
+   * 不能直接量竞技场包围盒 —— 那个模型带着外圈城墙和牌坊，包围盒有 78 宽，
+   * 半径会变成 39，相机和布景全被推到看不见的地方。
+   * 用两个出生点的间距当直径最稳，正好是双方对峙的那条线。
+   */
+  _arenaRadius() {
+    const span = this.spawnA && this.spawnB ? this.spawnA.distanceTo(this.spawnB) : 14;
+    // 出生点间距只是场地中间那条线，真正的石墙还要往外一圈，乘 1.25 正好贴墙
+    return Math.max(6, span * 1.25);
+  }
+
   /* ---------------- 尺寸与相机 ---------------- */
 
   fit() {
@@ -207,9 +236,13 @@ export class ClassicScene3D {
   }
 
   _frameCamera() {
-    // 侧后方的三分之四视角，既看得到整条推进路线，也看得到怪兽侧面
-    this.camera.position.set(11, 7.2, 8.6);
-    this.camera.lookAt(0, 1.5, 0);
+    // 等距 45° 俯视：水平方位角 45°，俯角约 38°，靠概念图那个感觉
+    // 距离跟着场地半径走，场地放大后自动退远，不会把单位顶出画面
+    const r = this.arenaRadius ?? 9;
+    const dist = r * 1.55;
+    const height = r * 1.05;
+    this.camera.position.set(dist * 0.707, height, dist * 0.707);
+    this.camera.lookAt(0, 1.2, 0);
     this._camBase.copy(this.camera.position);
   }
 
@@ -241,6 +274,7 @@ export class ClassicScene3D {
 
     this.time += dt;
     this.fx.update(dt, this.time);
+    this.dressing?.update(dt, this.time);
     // 震动只改相机位置，不碰朝向，避免画面晃得人晕
     this.camera.position.copy(this._camBase).add(this.fx.shakeOffset(this.time));
     // 重击时镜头轻轻推近，再自己弹回
@@ -683,6 +717,7 @@ export class ClassicScene3D {
   destroy() {
     this._clearUnits();
     this.fx.dispose();
+    this.dressing?.dispose();
     this.resize.disconnect();
     this.renderer.dispose();
   }
