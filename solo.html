@@ -34,26 +34,46 @@
 
 <section id="fight" hidden>
   <div class="battle-top">
-    <div><strong id="fight-label">战斗中</strong><span id="fight-time">0.0 秒</span></div>
-    <strong id="fight-clock">—</strong>
+    <div class="bt-side">
+      <strong id="fight-label">战斗中</strong>
+      <span id="fight-time">0.0 秒</span>
+    </div>
+    <div class="bt-side right">
+      <span class="bt-caption">对手下一击</span>
+      <strong id="fight-clock">—</strong>
+    </div>
   </div>
   <div class="stage" id="stage">
     <div id="solo-view"></div>
+    <div class="vignette" aria-hidden="true"></div>
     <div class="hp-row">
-      <div class="health">
-        <div><b id="self-name">你</b><span id="self-hp"></span></div>
-        <progress id="self-health" max="150" value="150"></progress>
+      <div class="fighter-card self">
+        <div class="fc-head">
+          <b id="self-name">你</b>
+          <span class="fc-hp" id="self-hp">150 / 150</span>
+        </div>
+        <div class="hp-track">
+          <span class="hp-ghost" id="self-ghost"></span>
+          <span class="hp-fill" id="self-fill"></span>
+        </div>
         <small id="self-buffs"></small>
       </div>
-      <span class="vs">VS</span>
-      <div class="health enemy">
-        <div><b id="enemy-name">对手</b><span id="enemy-hp"></span></div>
-        <progress id="enemy-health" max="240" value="240"></progress>
+      <div class="vs-medal" aria-hidden="true"><span>VS</span></div>
+      <div class="fighter-card enemy">
+        <div class="fc-head">
+          <span class="fc-hp" id="enemy-hp">240 / 240</span>
+          <b id="enemy-name">对手</b>
+        </div>
+        <div class="hp-track">
+          <span class="hp-ghost" id="enemy-ghost"></span>
+          <span class="hp-fill" id="enemy-fill"></span>
+        </div>
         <small id="enemy-buffs"></small>
       </div>
     </div>
     <p class="telegraph" id="telegraph" hidden>敌方蓄力重击 · 现在开盾能减半</p>
     <div class="result" id="solo-result" hidden>
+      <p class="result-eyebrow" id="result-eyebrow">BATTLE END</p>
       <h2 id="result-title"></h2>
       <p id="result-detail"></p>
       <div class="result-actions">

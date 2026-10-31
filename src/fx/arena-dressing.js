@@ -40,10 +40,15 @@ function glowTexture() {
 export class ArenaDressing {
   /**
    * @param {THREE.Scene} scene
-   * @param {{radius?:number, torchCount?:number, bannerCount?:number, lightTorches?:number}} options
+   * @param {{radius?:number, torchCount?:number, bannerCount?:number, lightTorches?:number,
+   *          starOpacity?:number, mountainColor?:number}} options
    *   radius = 场地半径，装饰件按它排布
+   *   starOpacity / mountainColor = 让调用方把远景压暗，避免抢角色
    */
-  constructor(scene, { radius = 9, torchCount = 10, bannerCount = 6, lightTorches = 2 } = {}) {
+  constructor(scene, {
+    radius = 9, torchCount = 10, bannerCount = 6, lightTorches = 2,
+    starOpacity = 0.75, mountainColor = 0x1a1526,
+  } = {}) {
     this.scene = scene;
     this.radius = radius;
     this.group = new THREE.Group();
@@ -51,6 +56,8 @@ export class ArenaDressing {
     this.rings = [];
     this.time = 0;
     this.glow = glowTexture();
+    this.starOpacity = starOpacity;
+    this.mountainColor = mountainColor;
 
     this._buildPillars(torchCount, lightTorches);
     this._buildBanners(bannerCount);
@@ -180,7 +187,7 @@ export class ArenaDressing {
 
   _buildMountains() {
     // 远处的三角山峰剪影：几个暗色圆锥，越远越暗
-    const material = new THREE.MeshBasicMaterial({ color: 0x1a1526, fog: false });
+    const material = new THREE.MeshBasicMaterial({ color: this.mountainColor, fog: false });
     const far = this.radius * 4.2;
 
     for (let i = 0; i < 9; i++) {
@@ -212,7 +219,7 @@ export class ArenaDressing {
       size: 0.35,
       sizeAttenuation: true,
       transparent: true,
-      opacity: 0.75,
+      opacity: this.starOpacity,
       depthWrite: false,
       fog: false,
     });
