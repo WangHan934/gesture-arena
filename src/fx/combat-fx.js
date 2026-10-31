@@ -36,6 +36,9 @@ const PROJECTILE_CAPACITY = 8;
 /** 冲击波池容量 */
 const SHOCKWAVE_CAPACITY = 8;
 
+/** 挥砍光弧池容量 */
+const SLASH_CAPACITY = 4;
+
 /** 闪电池容量 */
 const BOLT_CAPACITY = 4;
 
@@ -59,8 +62,41 @@ function makeGlowTexture() {
   return texture;
 }
 
-/** 六种手势符号的绘制路径（128×128 画布内），键和识别器的 id 一致 */
-const SYMBOL_PATHS = {
+/** 挥砍光弧贴图：一条两端渐隐的实心月牙，白色底，靠材质 color 染色 */
+function makeSlashTexture() {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const c = size / 2;
+
+  // 实心月牙（外弧 + 内弧反向围成），比描边更容易看清是「一道刀光」
+  const start = -Math.PI * 0.62;
+  const end = Math.PI * 0.62;
+  ctx.beginPath();
+  ctx.arc(c, c, size * 0.4, start, end);
+  ctx.arc(c, c, size * 0.25, end, start, true);
+  ctx.closePath();
+
+  // 沿对角线的渐变：两头淡、中间实，读起来像挥过去的一道残影
+  const gradient = ctx.createLinearGradient(0, size, size, 0);
+  gradient.addColorStop(0, 'rgba(255,255,255,0.08)');
+  gradient.addColorStop(0.45, 'rgba(255,255,255,0.95)');
+  gradient.addColorStop(0.55, 'rgba(255,255,255,1)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0.08)');
+  ctx.fillStyle = gradient;
+  ctx.shadowColor = 'rgba(255,255,255,0.9)';
+  ctx.shadowBlur = size * 0.045;
+  ctx.fill();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/** 六种手势符号的绘制路径（128×128 画布内），键和识别器的 id 一致 */const SYMBOL_PATHS = {
   circle: (ctx) => ctx.arc(64, 64, 40, 0, Math.PI * 2),
   line_v: (ctx) => { ctx.moveTo(64, 20); ctx.lineTo(64, 108); },
   line_h: (ctx) => { ctx.moveTo(20, 64); ctx.lineTo(108, 64); },
@@ -88,6 +124,7 @@ export class CombatFX {
     this._beams = this._makeBeams();
     this._projectiles = this._makeProjectiles();
     this._waves = this._makeShockwaves();
+    this._slashes = this._makeSlashes();
     this._bolts = this._makeBolts();
     this._bubbles = [];
     this._embers = this._makeEmbers();
@@ -531,6 +568,79 @@ export class CombatFX {
     }
   }
 
+  /* ---------------- 挥砍光弧 ---------------- */
+
+  _makeSlashes() {
+    const texture = makeSlashTexture();
+    const items = [];
+    if (!texture) return { items, cursor: 0 };
+    for (let i = 0; i < SLASH_CAPACITY; i++) {
+      const material = new THREE.SpriteMaterial({
+        map: texture,
+        color: 0xffffff,
+        transparent: true,
+        depthWrite: false,
+        depthTest: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const sprite = new THREE.Sprite(material);
+      sprite.visible = false;
+      sprite.renderOrder = 12;
+      this.scene.add(sprite);
+      items.push({ sprite, life: 0, maxLife: 0.22, size: 3, rotation: 0, spin: 1 });
+    }
+    return { items, cursor: 0, texture };
+  }
+
+  /**
+   * 近身挥砍：一道月牙从攻击者扫向目标。
+   * 光弧是 Sprite，天然朝向相机；旋转角度按「攻击方向在屏幕上的投影」算，
+   * 这样不管镜头怎么摆，刀光都是横着扫过去的，而不是凭空乱转。
+   */
+  slash(from, to, { color = '#ffd9a0', size = 3.2, life = 0.22, camera = null } = {}) {
+    if (!from || !to || !this._slashes.items.length) return;
+    const pool = this._slashes;
+    const item = pool.items[pool.cursor];
+    pool.cursor = (pool.cursor + 1) % pool.items.length;
+
+    item.sprite.position.lerpVectors(from, to, 0.72);
+
+    let angle = 0;
+    if (camera) {
+      const a = from.clone().project(camera);
+      const b = to.clone().project(camera);
+      // 屏幕坐标（y 向下）里的攻击方向
+      angle = Math.atan2(-(b.y - a.y), b.x - a.x);
+    }
+    item.rotation = angle + Math.PI * 0.5;
+    item.spin = (Math.random() < 0.5 ? -1 : 1) * 0.6;
+
+    item.sprite.material.color.set(color);
+    item.sprite.material.rotation = item.rotation;
+    item.sprite.material.opacity = 0.95;
+    item.sprite.scale.setScalar(size * 0.55);
+    item.sprite.visible = true;
+    item.size = size;
+    item.life = life;
+    item.maxLife = life;
+  }
+
+  _updateSlashes(dt) {
+    for (const item of this._slashes.items) {
+      if (item.life <= 0) continue;
+      item.life -= dt;
+      if (item.life <= 0) {
+        item.sprite.visible = false;
+        continue;
+      }
+      const progress = 1 - item.life / item.maxLife;
+      // 快速张开 + 迅速淡出，读起来就是「唰」一下
+      item.sprite.scale.setScalar(item.size * (0.55 + progress * 0.95));
+      item.sprite.material.opacity = 0.95 * (1 - progress) ** 1.7;
+      item.sprite.material.rotation = item.rotation + progress * item.spin;
+    }
+  }
+
   /* ---------------- 闪电 ---------------- */
 
   _makeBolts() {
@@ -921,6 +1031,7 @@ export class CombatFX {
     this._updateFlashes(dt);
     this._updateProjectiles(dt);
     this._updateShockwaves(dt);
+    this._updateSlashes(dt);
     this._updateBolts(dt);
     this._updateBubbles(dt);
     this._updateSymbols(dt);
@@ -996,6 +1107,11 @@ export class CombatFX {
       this.scene.remove(item.mesh);
       item.mesh.material.dispose();
     }
+    for (const item of this._slashes.items) {
+      this.scene.remove(item.sprite);
+      item.sprite.material.dispose();
+    }
+    this._slashes.texture?.dispose();
     for (const item of this._bolts.items) {
       this.scene.remove(item.line);
       item.geometry.dispose();

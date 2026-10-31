@@ -37,6 +37,11 @@ const scene = new SoloScene(document.createElement('canvas'), (state, message) =
   if (state === 'error') tell(message);
 });
 scene.mount($('select-preview'));
+// 调试钩子：只有带 ?debug 时才挂到 window，方便在控制台里单独验证某个特效，
+// 平时不暴露，避免和页面逻辑耦合。
+if (new URLSearchParams(location.search).has('debug')) {
+  window.__solo = { scene, get battle() { return battle; } };
+}
 scene.ready.then(() => {
   if (started && battle) scene.showFight(player.id, enemy);
   else scene.showSelect(player.id);
@@ -114,8 +119,6 @@ function startFight() {
 
   $('self-name').textContent = `${monsterById(player.id).name}（你）`;
   $('enemy-name').textContent = monsterById(enemy).name;
-  $('self-health').max = PLAYER_HP;
-  $('enemy-health').max = ENEMY_HP;
 
   scene.mount($('solo-view'));
   scene?.showFight(player.id, enemy);
@@ -127,6 +130,8 @@ function endFight() {
   const win = battle.winner === 'win';
   if (win) sfx.win(); else sfx.lose();
   $('result-title').textContent = win ? '胜利' : '失败';
+  $('result-eyebrow').textContent = win ? 'VICTORY' : 'DEFEAT';
+  $('solo-result').classList.toggle('win', win);
   $('result-detail').textContent =
     `用时 ${battle.time.toFixed(1)} 秒 · 剩余生命 ${battle.hp.player} / ${PLAYER_HP}`;
   $('solo-result').hidden = false;
@@ -166,13 +171,27 @@ function doCast(id) {
 
 /* ---------------- HUD ---------------- */
 
+/**
+ * 血条：把比例写进 CSS 变量，填充条和残影条用不同的过渡时长，
+ * 于是掉血时会出现「先掉一截、残影慢慢追」的效果，但数值是立刻变的。
+ */
+function setBar(who, value, max) {
+  const ratio = Math.max(0, Math.min(1, value / max));
+  const fill = $(`${who}-fill`);
+  const track = fill?.parentElement;
+  if (track) {
+    track.style.setProperty('--p', ratio.toFixed(4));
+    track.classList.toggle('low', ratio > 0 && ratio <= 0.3);
+  }
+  $(`${who}-hp`).textContent = `${Math.max(0, Math.round(value))} / ${max}`;
+}
+
 function renderHud() {
   if (!battle) return;
   const hp = battle.hp;
-  $('self-hp').textContent = `${hp.player} / ${PLAYER_HP}`;
-  $('enemy-hp').textContent = `${hp.enemy} / ${ENEMY_HP}`;
-  $('self-health').value = hp.player;
-  $('enemy-health').value = hp.enemy;
+  // 数值立刻更新（伤害结算不等动画），宽度的过渡交给 CSS
+  setBar('self', hp.player, PLAYER_HP);
+  setBar('enemy', hp.enemy, ENEMY_HP);
 
   const buffs = [];
   if (battle.shieldLeft > 0) buffs.push(`护盾 ${battle.shieldLeft.toFixed(1)}s`);
@@ -219,36 +238,59 @@ function tell(message) {
 
 /* ---------------- 特效 ---------------- */
 
-function floatText(text, kind) {
+function floatText(text, kind, seat = null) {
+  // 外面套一层定位锚点：飘字自己的 transform 留给动画，两者不打架
+  const anchor = document.createElement('span');
+  anchor.className = 'float-anchor';
+  const point = seat === null ? null : scene?.screenPoint?.(seat);
+  anchor.style.left = `${point ? point.x : kind === 'to-enemy' ? 72 : 28}%`;
+  anchor.style.top = `${point ? point.y : 34}%`;
+
   const el = document.createElement('span');
   el.className = `float-damage ${kind}`;
   el.textContent = text;
-  stage.append(el);
-  setTimeout(() => el.remove(), 1000);
+  anchor.append(el);
+  stage.append(anchor);
+  setTimeout(() => anchor.remove(), 1050);
+}
+
+function flashStage(kind) {
+  stage.classList.remove(kind);
+  void stage.offsetWidth; // 强制重排，让动画能重播
+  stage.classList.add(kind);
+  setTimeout(() => stage.classList.remove(kind), 480);
 }
 
 function flashHurt() {
-  stage.classList.remove('hurt');
-  void stage.offsetWidth; // 强制重排，让动画能重播
-  stage.classList.add('hurt');
-  setTimeout(() => stage.classList.remove('hurt'), 460);
+  flashStage('hurt');
 }
 
 function handleEvents() {
   for (const event of drainEvents(battle)) {
     switch (event.type) {
-      case 'playerHit':
-        // 出手动作 + 飞行物 + 命中爆点全在 castSpell 里按技能编排
-        scene?.castSpell(0, event.spell);
-        scene?.play(1, 'Hit');
-        floatText(`-${event.damage}`, 'to-enemy');
-        sfx.impact({ heavy: event.damage >= 22 });
-        if (battle.hp.enemy <= 0) scene?.die(1);
+      case 'playerHit': {
+        // 出手动作 + 飞行物 + 命中爆点全在 castSpell 里按技能编排。
+        // 它会把「飞多久」返回回来，数字和受击反馈等飞到了再出，别一出手就跳字。
+        const delay = scene?.castSpell(0, event.spell) ?? 0;
+        const heavy = event.damage >= 22;
+        const land = () => {
+          scene?.play(1, 'Hit');
+          scene?.impact(1, { heavy });
+          floatText(`-${event.damage}`, 'to-enemy', 1);
+          flashStage('hit-enemy');
+          sfx.impact({ heavy });
+          if (battle.hp.enemy <= 0) scene?.die(1);
+        };
+        if (delay > 0.02) setTimeout(land, delay * 1000);
+        else land();
         break;
+      }
       case 'enemyHit':
         scene?.play(1, 'Attack');
         scene?.play(0, 'Hit');
-        floatText(event.blocked ? `-${event.damage} 挡住` : `-${event.damage}`, 'to-player');
+        // 对手是近身打，先扫一道刀光过去再炸开
+        scene?.melee(1, 0, { heavy: !event.blocked && event.damage >= 12 });
+        floatText(event.blocked ? `-${event.damage} 挡住` : `-${event.damage}`, 'to-player', 0);
         flashHurt();
         scene?.impact(0, { heavy: !event.blocked && event.damage >= 12 });
         sfx.impact({ heavy: !event.blocked && event.damage >= 12 });
@@ -256,7 +298,7 @@ function handleEvents() {
         break;
       case 'heal':
         scene?.castSpell(0, 'two');
-        if (event.amount > 0) floatText(`+${event.amount}`, 'heal');
+        if (event.amount > 0) floatText(`+${event.amount}`, 'heal', 0);
         sfx.cast();
         break;
       case 'shield':

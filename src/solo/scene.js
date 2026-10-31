@@ -14,6 +14,26 @@ import { clone } from '../../vendor/three/examples/jsm/utils/SkeletonUtils.js';
 import { CombatFX } from '../fx/combat-fx.js';
 import { ArenaDressing } from '../fx/arena-dressing.js';
 import { HealthBarLayer, BAR_GAP } from '../fx/health-bar.js';
+import { ModelFlash } from '../fx/model-flash.js';
+import { MagicCircle } from '../fx/magic-circle.js';
+
+/** 背景天空：竖直渐变，上近黑、地平线透紫，给暗色场景一点纵深 */
+function skyTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 8;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createLinearGradient(0, 0, 0, 256);
+  gradient.addColorStop(0, '#07050f');
+  gradient.addColorStop(0.55, '#150d29');
+  gradient.addColorStop(0.82, '#2a1a4a');
+  gradient.addColorStop(1, '#150d29');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 8, 256);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
 
 const URLS = {
   fire: new URL('../../assets/models/fire.glb', import.meta.url).href,
@@ -28,7 +48,7 @@ const IDS = ['fire', 'shadow', 'rock'];
 const ELEMENT_COLOR = { fire: '#ff8a3d', shadow: '#b388ff', rock: '#9fd8ff' };
 
 /** 战斗时怪兽身高，血条按它算头顶位置 */
-const FIGHTER_HEIGHT = 4.1;
+const FIGHTER_HEIGHT = 4.9;
 
 /** 技能 id → 手势符号，用来在角色身前勾出这次的招式 */
 const SYMBOL_OF = {
@@ -52,23 +72,45 @@ export class SoloScene {
     this.lost = false;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#120d1c');
-    this.scene.fog = new THREE.Fog('#120d1c', 22, 55);
+    // 背景用一张竖直渐变贴图，比纯色更有纵深：上方近黑，地平线透一点紫
+    this.scene.background = skyTexture();
+    this.scene.fog = new THREE.Fog('#191033', 30, 82);
 
-    this.camera = new THREE.PerspectiveCamera(43, 1, 0.1, 150);
+    this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 160);
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.18;
+    // 比之前更暗一点：暗底才能让魔法阵和角色轮廓光「亮得出来」
+    this.renderer.toneMappingExposure = 1.06;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
-    this.scene.add(new THREE.HemisphereLight(0xcbd6ff, 0x2a1c2e, 1.85));
-    const key = new THREE.DirectionalLight(0xffd9b0, 3.5);
-    key.position.set(4, 12, 8);
+    // 三灯打光：紫色环境 + 金色主光（带阴影）+ 冷紫轮廓光，最后补一盏冷蓝填充
+    this.scene.add(new THREE.HemisphereLight(0x8b7ae0, 0x140d24, 1.05));
+
+    const key = new THREE.DirectionalLight(0xffd3a0, 2.6);
+    key.position.set(7, 13, 9);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.bias = -0.0008;
+    key.shadow.normalBias = 0.02;
+    key.shadow.camera.left = -16;
+    key.shadow.camera.right = 16;
+    key.shadow.camera.top = 16;
+    key.shadow.camera.bottom = -16;
+    key.shadow.camera.near = 1;
+    key.shadow.camera.far = 46;
     this.scene.add(key);
-    const rim = new THREE.DirectionalLight(0x7f6bff, 4.4);
-    rim.position.set(-9, 7, -8);
+    this.keyLight = key;
+
+    const rim = new THREE.DirectionalLight(0x8a6bff, 6.4);
+    rim.position.set(-10, 8, -10);
     this.scene.add(rim);
+
+    const fill = new THREE.DirectionalLight(0x6fa8ff, 0.75);
+    fill.position.set(-2, 3, 13);
+    this.scene.add(fill);
 
     this.resizeObserver = new ResizeObserver(() => this.fit());
     canvas.addEventListener('webglcontextlost', event => {
@@ -87,6 +129,8 @@ export class SoloScene {
     this.fx = new CombatFX(this.scene);
     // 头顶血条（共享层）。血量由 main.js 每帧塞进来，这里只管画
     this.bars = new HealthBarLayer(this.scene);
+    // 受击闪红：逐帧衰减，连击不会互相打断
+    this.flash = new ModelFlash();
     this.health = null;
     this.time = 0;
     this._camBase = new THREE.Vector3();
@@ -137,6 +181,13 @@ export class SoloScene {
       // 场地放大 1.3 倍，出生点跟着放大，相对位置不变
       this.arena.scale.setScalar(1.3);
       this.scene.add(this.arena);
+      // 场地只接阴影，不投阴影：它的城墙会在地面糊一大片黑，压掉角色
+      this.arena.traverse((node) => {
+        if (node.isMesh) {
+          node.receiveShadow = true;
+          node.castShadow = false;
+        }
+      });
     }
     // 布景：火把石柱、红旗、地面同心光环、远山、星空。
     // 半径按两个出生点的间距算，不能量包围盒（那个模型带外圈城墙，会大得离谱）
@@ -145,7 +196,30 @@ export class SoloScene {
       const b = this.arena.getObjectByName('Arena_Spawn_B_Enemy');
       const span = a && b ? a.getWorldPosition(new THREE.Vector3()).distanceTo(b.getWorldPosition(new THREE.Vector3())) : 14;
       this.arenaRadius = Math.max(6, span * 1.25);
-      this.dressing = new ArenaDressing(this.scene, { radius: this.arenaRadius, torchCount: 10, bannerCount: 6, lightTorches: 2 });
+      // 装饰收敛：火把 10 → 8，旗子 6 → 4，星空压暗，让两只怪兽站到视觉中心
+      this.dressing = new ArenaDressing(this.scene, {
+        radius: this.arenaRadius,
+        torchCount: 8,
+        bannerCount: 4,
+        lightTorches: 2,
+        starOpacity: 0.42,
+        mountainColor: 0x120c22,
+      });
+      // 地面魔法阵：半径按场地收一点，别顶到石墙
+      this.magicCircle = new MagicCircle(this.scene, {
+        radius: this.arenaRadius * 0.56,
+        color: '#a98bff',
+        accent: '#ffd08a',
+      });
+      // 主光的阴影相机跟着场地尺寸走
+      if (this.keyLight) {
+        const span2 = this.arenaRadius * 0.75;
+        this.keyLight.shadow.camera.left = -span2;
+        this.keyLight.shadow.camera.right = span2;
+        this.keyLight.shadow.camera.top = span2;
+        this.keyLight.shadow.camera.bottom = -span2;
+        this.keyLight.shadow.camera.updateProjectionMatrix();
+      }
     }
 
     this.loaded = true;
@@ -162,6 +236,16 @@ export class SoloScene {
     const template = this.templates[id];
     if (!template) return null;
     const object = clone(template.scene);
+    // 材质必须按实例 clone：SkeletonUtils.clone 只克隆节点树，材质是共享的。
+    // 受击闪红要改 emissive，共享材质会让「同款怪兽」一起闪。
+    object.traverse((node) => {
+      if (!node.isMesh) return;
+      node.castShadow = true;
+      node.receiveShadow = false;
+      node.material = Array.isArray(node.material)
+        ? node.material.map((material) => material.clone())
+        : node.material.clone();
+    });
     object.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(object);
     const size = box.getSize(new THREE.Vector3());
@@ -214,30 +298,53 @@ export class SoloScene {
       { id: playerId, spawn: 'Arena_Spawn_A_Player', facing: Math.PI * 0.89, fallback: [0, 0, 5.5] },
       { id: enemyId, spawn: 'Arena_Spawn_B_Enemy', facing: -Math.PI * 0.11, fallback: [0, 0, -5.5] },
     ];
+    // 出生点在场地边缘，两个人隔了整块石台，角色在画面里显得很小。
+    // 往场地中心收 38%，两只怪兽靠近魔法阵，构图才是「对峙」而不是「各站一角」。
+    const spots = layout.map((slot) => {
+      const anchor = this.arena?.getObjectByName(slot.spawn);
+      return anchor ? anchor.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(...slot.fallback);
+    });
+    const center = spots[0].clone().add(spots[1]).multiplyScalar(0.5);
+    const placed = spots.map((spot) => {
+      const point = spot.clone().lerp(center, 0.26);
+      point.y += 0.25;
+      return point;
+    });
     layout.forEach((slot, seat) => {
       const model = this.build(slot.id, FIGHTER_HEIGHT);
       if (!model) return;
-      const anchor = this.arena?.getObjectByName(slot.spawn);
-      const position = anchor
-        ? anchor.getWorldPosition(new THREE.Vector3())
-        : new THREE.Vector3(...slot.fallback);
-      position.y += 0.25;
+      const position = placed[seat];
       model.root.position.copy(position);
-      model.root.rotation.y = slot.facing;
+      // 朝向直接算：永远面对对手，跟镜头怎么摆无关
+      const dir = placed[seat === 0 ? 1 : 0].clone().sub(position).setY(0).normalize();
+      const yaw = Math.atan2(dir.x, dir.z);
+      model.root.rotation.y = yaw;
+      model.baseYaw = yaw;
+      // 前冲 / 击退的方向
+      model.toward = dir.clone();
+      model.knock = dir.clone().negate();
+      model.bobPhase = seat * 1.7 + Math.random() * 0.6;
       model.seat = seat;
       model.base.copy(position);
       model.facing = seat === 0 ? -1 : 1;
       model.color = ELEMENT_COLOR[slot.id] ?? '#ffb45a';
       this.scene.add(model.root);
       this.fighters.push(model);
-      model.ring = this.fx.addRing(model.root, model.color, 1.7);
+      model.ring = this.fx.addRing(model.root, model.color, 1.9);
       this.playModel(model, 'Idle');
     });
-    // 等距 45° 俯视，距离跟着场地半径走
+    // 镜头垂直站在双方连线的侧面：两个人横向并排，不会一前一后互相挡
     const r = this.arenaRadius ?? 18;
-    this.camera.position.set(r * 1.1, r * 0.72, r * 1.1);
-    this.camera.lookAt(0, 1.6, 0);
+    const axis = spots[1].clone().sub(spots[0]).setY(0).normalize();
+    const side = new THREE.Vector3(-axis.z, 0, axis.x);
+    // 选朝向「世界 +x+z」的那一侧（和布景、牌坊的正面一致）
+    if (side.dot(new THREE.Vector3(1, 0, 1)) < 0) side.negate();
+    const dist = r * 0.78;
+    this.camera.position.copy(center).addScaledVector(side, dist);
+    this.camera.position.y = r * 0.5;
+    this.camera.lookAt(center.x, 2.6, center.z);
     this._camBase.copy(this.camera.position);
+    this._camTarget = new THREE.Vector3(center.x, 2.6, center.z);
   }
 
   clearFighters() {
@@ -249,6 +356,7 @@ export class SoloScene {
     }
     this.fighters = [];
     this.bars.clear();
+    this.flash.clear();
     this.health = null;
   }
 
@@ -305,7 +413,10 @@ export class SoloScene {
   /** 对外：按座位播一个动作 */
   play(seat, name) {
     const fighter = this.fighters.find(f => f.seat === seat);
-    if (fighter) this.playModel(fighter, name, name !== 'Idle');
+    if (!fighter) return;
+    // 击退和骨骼动画无关：有 Hit 动画的模型也要被打退半步
+    if (name === 'Hit') fighter.recoil = Math.max(fighter.recoil, 0.3);
+    this.playModel(fighter, name, name !== 'Idle');
   }
 
   die(seat) {
@@ -315,14 +426,53 @@ export class SoloScene {
     if (fighter.clips.some(c => c.name === 'Death')) this.playModel(fighter, 'Death', true);
     else fighter.fall = 0.001; // 交给 update 做倒下
     // 倒下瞬间爆一下，比单纯播动画有打击感
-    this.fx.impact(this._bodyPoint(fighter), { color: fighter.color, heavy: true });
+    const point = this._bodyPoint(fighter);
+    this.fx.impact(point, { color: fighter.color, heavy: true });
+    this.fx.shockwave(point, { color: fighter.color, radius: 3.4, life: 0.6 });
+    this.fx.shake(0.9);
+    this.flash.flash(fighter.root, { color: 0xff4030, duration: 0.5, peak: 0.55 });
   }
 
   /** 命中特效。seat = 被打的那一方 */
   impact(seat, { heavy = false } = {}) {
     const fighter = this.fighters.find(f => f.seat === seat);
     if (!fighter) return;
-    this.fx.impact(this._bodyPoint(fighter), { color: fighter.color, heavy });
+    const point = this._bodyPoint(fighter);
+    this.fx.impact(point, { color: fighter.color, heavy });
+    // 受击闪红 + 镜头震一下：这一下才是「打中了」的主要反馈
+    this.flash.flash(fighter.root, { color: 0xff3040, peak: heavy ? 0.42 : 0.26 });
+    this.fx.shake(heavy ? 0.55 : 0.28);
+    // 重击退得多一点，轻击只晃一下
+    fighter.knockback = heavy ? 1.15 : 0.7;
+    fighter.recoil = Math.max(fighter.recoil, heavy ? 0.34 : 0.28);
+    if (heavy) this.fx.shockwave(point, { color: fighter.color, radius: 2.2, life: 0.42 });
+  }
+
+  /** 近身挥砍：从出手方向扫一道光弧过去 */
+  melee(fromSeat, toSeat, { color = null, heavy = false } = {}) {
+    const from = this.fighters.find(f => f.seat === fromSeat);
+    const to = this.fighters.find(f => f.seat === toSeat);
+    if (!from || !to) return;
+    this.fx.slash(this._bodyPoint(from), this._bodyPoint(to), {
+      color: color ?? from.color,
+      size: heavy ? 5.4 : 4.2,
+      life: heavy ? 0.26 : 0.2,
+      camera: this.camera,
+    });
+  }
+
+  /**
+   * 把一个座位的位置投影成舞台内的百分比坐标，给 HTML 伤害飘字用。
+   * 飘字跟着角色走，比固定在屏幕某个角落准确得多。
+   */
+  screenPoint(seat) {
+    const fighter = this.fighters.find(f => f.seat === seat);
+    if (!fighter) return null;
+    const point = this._bodyPoint(fighter).project(this.camera);
+    return {
+      x: (point.x * 0.5 + 0.5) * 100,
+      y: (-point.y * 0.5 + 0.5) * 100,
+    };
   }
 
   /** 远程能量束：fromSeat 打到 toSeat */
@@ -348,6 +498,8 @@ export class SoloScene {
     const color = caster.color ?? '#ffb45a';
     const self = this._bodyPoint(caster);
     const to = target ? this._bodyPoint(target) : null;
+    // 命中延迟（秒）：飞行类技能的数字和受击反馈要等它真的飞到，不能一出手就跳字
+    let impactDelay = 0;
 
     // 先在身前把这次手势的符号勾出来，观众一眼能看出是哪一招
     this.fx.symbol(this._frontPoint(caster, target), SYMBOL_OF[spellId] ?? 'circle', { color, size: 2.4 });
@@ -357,9 +509,11 @@ export class SoloScene {
       case 'circle':
         this.play(seat, 'Cast');
         if (to) {
+          const speed = 18;
+          impactDelay = self.distanceTo(to) / speed;
           this.fx.projectile(self, to, {
             color,
-            speed: 18,
+            speed,
             onArrive: (point) => this.fx.shockwave(point, { color, radius: 1.9, life: 0.36 }),
           });
         }
@@ -408,6 +562,7 @@ export class SoloScene {
         this.play(seat, 'Cast');
         break;
     }
+    return impactDelay;
   }
 
   /** 躯干高度，特效打这里最像「被打到」 */
@@ -436,26 +591,39 @@ export class SoloScene {
         model.timer -= dt;
         if (model.timer <= 0 && !model.dead) this.playModel(model, 'Idle');
       }
-      if (model.lunge > 0) {
-        model.lunge = Math.max(0, model.lunge - dt);
-        const push = Math.sin((1 - model.lunge / 0.34) * Math.PI) * 1.1;
-        model.root.position.z = model.base.z + push * model.facing;
-      } else if (model.recoil > 0) {
-        model.recoil = Math.max(0, model.recoil - dt);
-        const push = Math.sin((1 - model.recoil / 0.3) * Math.PI) * 0.7;
-        model.root.position.z = model.base.z - push * model.facing;
-      } else if (model.base) {
-        model.root.position.z = model.base.z;
+      if (model.base) {
+        // 前冲 / 击退都沿「双方连线」推，不再假设战场一定沿 z 轴
+        model.root.position.copy(model.base);
+        if (model.lunge > 0) {
+          model.lunge = Math.max(0, model.lunge - dt);
+          const push = Math.sin((1 - model.lunge / 0.34) * Math.PI) * 1.1;
+          model.root.position.addScaledVector(model.toward, push);
+        } else if (model.recoil > 0) {
+          model.recoil = Math.max(0, model.recoil - dt);
+          // 被打退半步：重击退得多，轻击退得少
+          const push = Math.sin((1 - model.recoil / 0.3) * Math.PI) * (model.knockback ?? 0.85);
+          model.root.position.addScaledVector(model.knock, push);
+        }
       }
       if (model.fall > 0) {
         model.fall = Math.min(1, model.fall + dt * 1.4);
         model.root.rotation.z = -model.fall * 1.35;
         model.root.position.y = model.base.y - model.fall * 0.4;
+      } else if (model.base) {
+        // 站桩呼吸：刚体模型没有 Idle 动画，靠整体轻微起伏 + 微摆，画面才不是静止的
+        const phase = model.bobPhase ?? 0;
+        const breath = Math.sin(this.time * 1.7 + phase);
+        model.root.position.y = model.base.y + breath * 0.05;
+        if (model.baseYaw !== undefined) {
+          model.root.rotation.y = model.baseYaw + Math.sin(this.time * 0.9 + phase) * 0.025;
+        }
       }
     }
 
     this.time += dt;
     this.fx.update(dt, this.time);
+    this.flash.update(dt);
+    this.magicCircle?.update(dt, this.time);
     this._syncBars();
     this.bars.update(dt);
     this.dressing?.update(dt, this.time);
