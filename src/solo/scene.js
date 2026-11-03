@@ -16,6 +16,9 @@ import { ArenaDressing } from '../fx/arena-dressing.js';
 import { HealthBarLayer, BAR_GAP } from '../fx/health-bar.js';
 import { ModelFlash } from '../fx/model-flash.js';
 import { MagicCircle } from '../fx/magic-circle.js';
+import { buildMap, getLighting, describeMaps } from '../maps/index.js';
+import { MapParticles } from '../maps/particles.js';
+import { createTextures } from '../maps/textures.js';
 
 /** 背景天空：竖直渐变，上近黑、地平线透紫，给暗色场景一点纵深 */
 function skyTexture() {
@@ -61,15 +64,26 @@ const SYMBOL_OF = {
 };
 
 export class SoloScene {
-  constructor(canvas, onStatus) {
+  /**
+   * @param {HTMLCanvasElement} canvas
+   * @param {(state:string, message:string) => void} [onStatus]
+   * @param {{mapId?: string|null}} [options] mapId = 程序化场地 id，null 走经典竞技场
+   */
+  constructor(canvas, onStatus, { mapId = null } = {}) {
     this.canvas = canvas;
     this.onStatus = onStatus;
     this.templates = {};
     this.fighters = [];
     this.preview = null;
+    this.previewId = null;
     this.mode = 'select';
     this.loaded = false;
     this.lost = false;
+    // 场地：null = arena.glb，其余是 src/maps/ 里的程序化地图
+    this.mapId = mapId;
+    this.mapMeta = null;
+    this.circles = null;
+    this.particles = null;
 
     this.scene = new THREE.Scene();
     // 背景用一张竖直渐变贴图，比纯色更有纵深：上方近黑，地平线透一点紫
@@ -87,7 +101,8 @@ export class SoloScene {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     // 三灯打光：紫色环境 + 金色主光（带阴影）+ 冷紫轮廓光，最后补一盏冷蓝填充
-    this.scene.add(new THREE.HemisphereLight(0x8b7ae0, 0x140d24, 1.05));
+    this.hemiLight = new THREE.HemisphereLight(0x8b7ae0, 0x140d24, 1.05);
+    this.scene.add(this.hemiLight);
 
     const key = new THREE.DirectionalLight(0xffd3a0, 2.6);
     key.position.set(7, 13, 9);
@@ -157,7 +172,8 @@ export class SoloScene {
   async load() {
     this.onStatus?.('loading', '正在加载竞技场与怪兽…');
     const loader = new GLTFLoader();
-    const entries = Object.entries(URLS);
+    // 指定了场地（?map= 或选图）就不下 arena.glb —— 省 766K，反正用不上
+    const entries = Object.entries(URLS).filter(([id]) => id !== 'arena' || !this.mapId);
     let done = 0;
     // 下完一份报一次进度，别让人盯着不动的文案等
     const results = await Promise.allSettled(entries.map(async ([id, url]) => {
@@ -168,7 +184,7 @@ export class SoloScene {
     }));
     const failed = [];
     results.forEach((result, index) => {
-      const id = Object.keys(URLS)[index];
+      const id = entries[index][0];
       if (result.status === 'fulfilled') {
         const [loadedId, gltf] = result.value;
         this.templates[loadedId] = gltf;
@@ -176,12 +192,47 @@ export class SoloScene {
         failed.push(id);
       }
     });
-    if (this.templates.arena) {
+
+    this._installArena();
+
+    this.loaded = true;
+    if (failed.length) {
+      this.onStatus?.('error', `模型加载失败：${failed.join('、')}，请检查 assets/models/`);
+    } else {
+      this.onStatus?.('ready', '竞技场就绪');
+    }
+    return this;
+  }
+
+  /* ---------------- 场地 ----------------
+   * 两条来源：
+   *   1. 经典竞技场 arena.glb（默认，放大 1.3，配 ArenaDressing 布景）
+   *   2. src/maps/ 的程序化场地（四张），自带火盆 / 远景 / 命名出生点
+   * 两者都提供 Arena_Spawn_A_Player / B_Enemy，所以 _prepare() 之后
+   * 出生点、半径、相机、血条全都不用改。
+   */
+
+  /** 装场地：先清掉旧的，再按 mapId 决定用哪一套 */
+  _installArena() {
+    this._clearArena();
+
+    const custom = this.mapId ? buildMap(this.mapId) : null;
+    if (custom) {
+      this.arena = custom.group;
+      this.mapMeta = custom.meta;
+      this.scene.add(this.arena);
+      // 场地只接阴影不投阴影：城墙会在地面糊一大片黑，压掉角色
+      this.arena.traverse((node) => {
+        if (node.isMesh) {
+          node.receiveShadow = true;
+          node.castShadow = false;
+        }
+      });
+    } else if (this.templates.arena) {
       this.arena = this.templates.arena.scene;
       // 场地放大 1.3 倍，出生点跟着放大，相对位置不变
       this.arena.scale.setScalar(1.3);
       this.scene.add(this.arena);
-      // 场地只接阴影，不投阴影：它的城墙会在地面糊一大片黑，压掉角色
       this.arena.traverse((node) => {
         if (node.isMesh) {
           node.receiveShadow = true;
@@ -189,13 +240,15 @@ export class SoloScene {
         }
       });
     }
-    // 布景：火把石柱、红旗、地面同心光环、远山、星空。
-    // 半径按两个出生点的间距算，不能量包围盒（那个模型带外圈城墙，会大得离谱）
-    if (this.arena) {
-      const a = this.arena.getObjectByName('Arena_Spawn_A_Player');
-      const b = this.arena.getObjectByName('Arena_Spawn_B_Enemy');
-      const span = a && b ? a.getWorldPosition(new THREE.Vector3()).distanceTo(b.getWorldPosition(new THREE.Vector3())) : 14;
-      this.arenaRadius = Math.max(6, span * 1.25);
+    if (!this.arena) return;
+
+    this._prepare();
+
+    if (custom) {
+      // 程序化场地自带火盆和远景，不要再叠一层布景（会插进战斗区）
+      this._applyMapMood(this.mapId);
+      this._installMapExtras(custom.meta);
+    } else {
       // 装饰收敛：火把 10 → 8，旗子 6 → 4，星空压暗，让两只怪兽站到视觉中心
       this.dressing = new ArenaDressing(this.scene, {
         radius: this.arenaRadius,
@@ -211,24 +264,130 @@ export class SoloScene {
         color: '#a98bff',
         accent: '#ffd08a',
       });
-      // 主光的阴影相机跟着场地尺寸走
-      if (this.keyLight) {
-        const span2 = this.arenaRadius * 0.75;
-        this.keyLight.shadow.camera.left = -span2;
-        this.keyLight.shadow.camera.right = span2;
-        this.keyLight.shadow.camera.top = span2;
-        this.keyLight.shadow.camera.bottom = -span2;
-        this.keyLight.shadow.camera.updateProjectionMatrix();
-      }
     }
 
-    this.loaded = true;
-    if (failed.length) {
-      this.onStatus?.('error', `模型加载失败：${failed.join('、')}，请检查 assets/models/`);
-    } else {
-      this.onStatus?.('ready', '竞技场就绪');
+    // 主光的阴影相机跟着场地尺寸走
+    if (this.keyLight) {
+      const span = this.arenaRadius * 0.75;
+      this.keyLight.shadow.camera.left = -span;
+      this.keyLight.shadow.camera.right = span;
+      this.keyLight.shadow.camera.top = span;
+      this.keyLight.shadow.camera.bottom = -span;
+      this.keyLight.shadow.camera.updateProjectionMatrix();
     }
-    return this;
+  }
+
+  /** 把旧场地和它的附加物摘下来。程序化场地的几何体是共享原型，不能 dispose */
+  _clearArena() {
+    if (this.arena) this.scene.remove(this.arena);
+    this.arena = null;
+    this.mapMeta = null;
+    this.dressing?.dispose();
+    this.dressing = null;
+    this.magicCircle?.dispose();
+    this.magicCircle = null;
+    if (this.circles) {
+      for (const circle of this.circles) circle.dispose();
+      this.circles = null;
+    }
+    this.particles?.dispose?.();
+    this.particles = null;
+    this.spawnA = null;
+    this.spawnB = null;
+    this.arenaRadius = null;
+  }
+
+  /**
+   * 程序化场地的附加物：法阵 + 火盆粒子。
+   * 都挂在场景根上，不碰单位、不碰相机，所以不影响战斗表现。
+   */
+  _installMapExtras(meta) {
+    if (Array.isArray(meta.sigils) && meta.sigils.length) {
+      this.circles = meta.sigils.map((sigil) => {
+        const circle = new MagicCircle(this.scene, {
+          radius: sigil.radius,
+          color: meta.accent ?? '#ff5a1e',
+          accent: '#ffd08a',
+          // 自带光晕贴图写死了紫色，和熔岩打架；关掉更干净
+          glow: false,
+        });
+        circle.group.position.set(sigil.x, (sigil.y ?? 0) + 0.03, sigil.z);
+        return circle;
+      });
+    } else {
+      // 没有自带法阵的地图，补一个在中心
+      this.magicCircle = new MagicCircle(this.scene, {
+        radius: this.arenaRadius * 0.5,
+        color: '#a98bff',
+        accent: '#ffd08a',
+      });
+      this.magicCircle.group.position.y = this._groundAt(0, 0) + 0.04;
+    }
+
+    if (Array.isArray(meta.braziers) && meta.braziers.length) {
+      this.particles = new MapParticles(this.scene, {
+        braziers: meta.braziers,
+        radius: meta.radius ?? 12,
+        textures: createTextures(),
+      });
+    }
+  }
+
+  /** 换主题时的背景 / 雾 / 主光颜色。轮廓光和填充光保留，冷暖对比不能丢 */
+  _applyMapMood(mapId) {
+    const light = getLighting(mapId);
+    if (!light) return;
+    this.scene.background = new THREE.Color(light.background);
+    // 预设的雾是按大场地给的，这里按战斗区尺度收一半
+    this.scene.fog = new THREE.Fog(light.fog.color, light.fog.near * 0.5, light.fog.far * 0.5);
+    if (this.keyLight) this.keyLight.color.set(light.key.color);
+    if (this.hemiLight) {
+      this.hemiLight.color.set(light.hemi.sky);
+      this.hemiLight.groundColor.set(light.hemi.ground);
+    }
+  }
+
+  /** 某个坐标的地面高度：程序化场地有 heightAt，经典场地是平的 */
+  _groundAt(x, z) {
+    const height = this.mapMeta?.heightAt?.(x, z);
+    return Number.isFinite(height) ? height : 0;
+  }
+
+  /** 从场地的命名节点取出生点和场地半径（两种场地都自带这两个节点） */
+  _prepare() {
+    const pick = (name, fallback) => {
+      const node = this.arena?.getObjectByName(name);
+      return node ? node.getWorldPosition(new THREE.Vector3()) : fallback;
+    };
+    this.spawnA = pick('Arena_Spawn_A_Player', new THREE.Vector3(0, 0, 5.5));
+    this.spawnB = pick('Arena_Spawn_B_Enemy', new THREE.Vector3(0, 0, -5.5));
+    const span = this.spawnA.distanceTo(this.spawnB) || 14;
+    this.arenaRadius = Math.max(6, span * 1.25);
+  }
+
+  /**
+   * 换场地。选怪页调用；换完把预览重新摆一次。
+   * @param {string|null} id null = 经典竞技场
+   */
+  async setMap(id) {
+    const next = id || null;
+    if (next === this.mapId) return;
+    // 切回经典场地时，arena.glb 可能一开始为了省流量没下
+    if (!next && !this.templates.arena) {
+      this.onStatus?.('loading', '正在加载经典竞技场…');
+      try {
+        const gltf = await new GLTFLoader().loadAsync(URLS.arena);
+        this.templates.arena = gltf;
+      } catch (error) {
+        console.error('[3D] 经典竞技场加载失败', error);
+        this.onStatus?.('error', '经典竞技场加载失败，请刷新页面。');
+        return;
+      }
+    }
+    this.mapId = next;
+    this.clearFighters();
+    this._installArena();
+    if (this.previewId) this.showSelect(this.previewId);
   }
 
   /** 从模板克隆一只，并把脚底对齐到地面 */
@@ -267,6 +426,7 @@ export class SoloScene {
   /** 选怪阶段：只站一只，正面看 */
   showSelect(id) {
     this.mode = 'select';
+    this.previewId = id;
     this.clearFighters();
     if (this.preview) {
       this.scene.remove(this.preview.root);
@@ -275,12 +435,16 @@ export class SoloScene {
     }
     const model = this.build(id, 5.2);
     if (!model) return;
-    model.root.position.set(0, 0.26, 0);
+    // 台地类场地中心是抬高的，预览要站在实际地面上
+    const ground = this._groundAt(0, 0);
+    model.root.position.set(0, ground + 0.26, 0);
     this.scene.add(model.root);
     this.preview = model;
     this.playModel(model, 'Idle');
-    this.camera.position.set(0, 5.2, 12.5);
-    this.camera.lookAt(0, 2.2, 0);
+    const lookY = ground + 2.2;
+    const dist = Math.max(9, (this.arenaRadius ?? 12) * 0.72);
+    this.camera.position.set(0, ground + dist * 0.42, dist);
+    this.camera.lookAt(0, lookY, 0);
     this._camBase.copy(this.camera.position);
   }
 
@@ -307,7 +471,8 @@ export class SoloScene {
     const center = spots[0].clone().add(spots[1]).multiplyScalar(0.5);
     const placed = spots.map((spot) => {
       const point = spot.clone().lerp(center, 0.26);
-      point.y += 0.25;
+      // 台地 / 岛链的出生点不在同一高度，收拢之后按地面重算一次 y
+      point.y = this._groundAt(point.x, point.z) + 0.25;
       return point;
     });
     layout.forEach((slot, seat) => {
@@ -339,12 +504,16 @@ export class SoloScene {
     const side = new THREE.Vector3(-axis.z, 0, axis.x);
     // 选朝向「世界 +x+z」的那一侧（和布景、牌坊的正面一致）
     if (side.dot(new THREE.Vector3(1, 0, 1)) < 0) side.negate();
-    const dist = r * 0.78;
+    // 程序化场地外圈有柱子和浮岛，相机要站到外墙之外，否则前景挡人
+    const wall = (this.mapMeta?.wallRadius ?? 0) * 1.25;
+    const dist = Math.max(r * 0.78, wall, 12);
+    // 台地类场地中心是抬高的，取景高度要跟着地面走
+    const ground = this._groundAt(center.x, center.z);
     this.camera.position.copy(center).addScaledVector(side, dist);
-    this.camera.position.y = r * 0.5;
-    this.camera.lookAt(center.x, 2.6, center.z);
+    this.camera.position.y = ground + dist * 0.55;
+    this.camera.lookAt(center.x, ground + 2.6, center.z);
     this._camBase.copy(this.camera.position);
-    this._camTarget = new THREE.Vector3(center.x, 2.6, center.z);
+    this._camTarget = new THREE.Vector3(center.x, ground + 2.6, center.z);
   }
 
   clearFighters() {
@@ -624,6 +793,8 @@ export class SoloScene {
     this.fx.update(dt, this.time);
     this.flash.update(dt);
     this.magicCircle?.update(dt, this.time);
+    if (this.circles) for (const circle of this.circles) circle.update(dt, this.time);
+    this.particles?.update(dt);
     this._syncBars();
     this.bars.update(dt);
     this.dressing?.update(dt, this.time);

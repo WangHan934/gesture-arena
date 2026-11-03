@@ -11,6 +11,7 @@ import {
   SOLO_SPELLS, SPELL_BY_ID, PLAYER_HP, ENEMY_HP, ENEMY_INTERVAL,
 } from './engine.js';
 import { SoloScene } from './scene.js';
+import { describeMaps } from '../maps/index.js';
 import { GestureCanvas } from '../input/gesture-canvas.js';
 import { recognizeSpell } from '../input/gesture-recognizer.js';
 import { CameraInput } from '../input/camera-input.js';
@@ -27,6 +28,10 @@ let started = false;
 
 /* ---------------- 3D 场景 ---------------- */
 
+// ?map=<id> 直接进指定场地（方便演示时一键切到某张图）
+const params = new URLSearchParams(location.search);
+const initialMap = describeMaps().some(map => map.id === params.get('map')) ? params.get('map') : null;
+
 const scene = new SoloScene(document.createElement('canvas'), (state, message) => {
   $('solo-status').textContent = message;
   const hint = $('preview-hint');
@@ -35,7 +40,7 @@ const scene = new SoloScene(document.createElement('canvas'), (state, message) =
     hint.hidden = state === 'ready';
   }
   if (state === 'error') tell(message);
-});
+}, { mapId: initialMap });
 scene.mount($('select-preview'));
 // 调试钩子：只有带 ?debug 时才挂到 window，方便在控制台里单独验证某个特效，
 // 平时不暴露，避免和页面逻辑耦合。
@@ -49,6 +54,43 @@ scene.ready.then(() => {
   console.error('[3D] 初始化失败', error);
   tell(`3D 初始化失败：${error.message}`);
 });
+
+/* ---------------- 场地选择 ---------------- */
+
+/** 经典竞技场排在最前面，后面是 src/maps/ 的四张程序化场地 */
+function renderMaps() {
+  const host = $('map-picker');
+  if (!host) return;
+  host.replaceChildren();
+  const entries = [
+    { id: null, name: '经典竞技场', tagline: '原始 arena.glb', accent: '#a98bff' },
+    ...describeMaps(),
+  ];
+  for (const map of entries) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'map-chip';
+    button.style.setProperty('--accent', map.accent || '#a98bff');
+    button.classList.toggle('on', (scene.mapId ?? null) === map.id);
+    const name = document.createElement('b');
+    name.textContent = map.name;
+    const tag = document.createElement('small');
+    tag.textContent = map.tagline || '';
+    button.title = map.tagline ? `${map.name} · ${map.tagline}` : map.name;
+    button.append(name, tag);
+    button.onclick = async () => {
+      if ((scene.mapId ?? null) === map.id) return;
+      button.disabled = true;
+      await scene.setMap(map.id);
+      button.disabled = false;
+      renderMaps();
+      tell(`场地：${map.name}`);
+    };
+    host.append(button);
+  }
+}
+
+renderMaps();
 
 /* ---------------- 选怪 ---------------- */
 

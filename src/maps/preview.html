@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>3D 地图库 · Gesture Arena</title>
+<style>
+  :root {
+    --paper: #faf7f2; --card: #fff; --ink: #1c1a17; --ink2: #5b554c; --ink3: #918a7e;
+    --line: #e6e0d6; --red: #a8322a; --red-soft: #f4e9e7; --ok: #2d6a4f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
+    background: var(--paper); color: var(--ink); height: 100vh;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    padding: 14px 24px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; z-index: 5;
+  }
+  h1 { font-size: 18px; font-weight: 700; letter-spacing: -.2px; }
+  h1 em { font-style: normal; color: var(--red); }
+  .sub { font-size: 12px; color: var(--ink3); }
+  .nav { margin-left: auto; display: flex; gap: 8px; }
+  .nav a {
+    font-size: 12px; color: var(--ink2); text-decoration: none;
+    border: 1px solid var(--line); padding: 4px 10px; border-radius: 2px;
+  }
+  .nav a:hover { border-color: var(--ink3); color: var(--ink); }
+
+  main { flex: 1; display: flex; min-height: 0; }
+  #viewport { flex: 1; position: relative; min-width: 0; background: #10141c; }
+  #viewport canvas { display: block; width: 100%; height: 100%; }
+
+  .stats {
+    position: absolute; left: 16px; top: 14px;
+    font-family: "SF Mono", Consolas, monospace; font-size: 11.5px; line-height: 1.85;
+    color: #cfd6e4; background: rgba(12,16,24,.62); padding: 9px 13px; border-radius: 2px;
+    backdrop-filter: blur(6px); pointer-events: none;
+  }
+  .stats b { color: #fff; font-weight: 600; }
+  .hint {
+    position: absolute; left: 16px; bottom: 14px; font-size: 11.5px; color: #a8b0c0;
+    background: rgba(12,16,24,.55); padding: 5px 11px; border-radius: 2px; pointer-events: none;
+  }
+  .nameplate { position: absolute; right: 18px; bottom: 16px; text-align: right; pointer-events: none; }
+  .nameplate .n { font-size: 22px; font-weight: 750; letter-spacing: -.3px; color: #fff; }
+  .nameplate .e { font-size: 10.5px; letter-spacing: 1.6px; color: #9aa4b8; text-transform: uppercase; }
+
+  aside {
+    width: 320px; flex: none; border-left: 1px solid var(--line);
+    background: var(--card); overflow-y: auto; padding: 18px;
+  }
+  .group { margin-bottom: 20px; }
+  .group h2 {
+    font-size: 10.5px; letter-spacing: .16em; color: var(--ink3);
+    font-weight: 600; margin-bottom: 8px; text-transform: uppercase;
+  }
+  .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .btn {
+    font: inherit; font-size: 12px; padding: 7px 9px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--paper); color: var(--ink2);
+    border-radius: 2px; transition: .14s; text-align: center;
+  }
+  .btn:hover { border-color: var(--ink3); color: var(--ink); }
+  .btn.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+  .list { display: flex; flex-direction: column; gap: 4px; }
+  .item {
+    display: flex; align-items: center; gap: 10px; padding: 9px 10px; cursor: pointer;
+    border: 1px solid transparent; border-radius: 2px; background: transparent;
+    text-align: left; font: inherit; width: 100%;
+  }
+  .item:hover { background: var(--paper); }
+  .item.on { background: var(--red-soft); border-color: #e8d3cf; }
+  .item .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .item .nm { font-size: 13px; font-weight: 600; }
+  .item .en { font-size: 9.5px; color: var(--ink3); letter-spacing: .8px; text-transform: uppercase; }
+  .item .tr {
+    margin-left: auto; font-size: 10px; color: var(--ink3);
+    font-family: "SF Mono", Consolas, monospace;
+  }
+  .badge {
+    font-size: 9px; padding: 1px 5px; border-radius: 2px;
+    background: var(--paper); color: var(--ink3); border: 1px solid var(--line);
+  }
+  .badge.ok { background: #eef5f0; color: var(--ok); border-color: #cfe3d6; }
+
+  .meta div {
+    display: flex; justify-content: space-between; padding: 5px 0;
+    border-bottom: 1px dashed var(--line); font-size: 12px; color: var(--ink2);
+  }
+  .meta div:last-child { border: none; }
+  .meta span:last-child { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .note { font-size: 11.5px; color: var(--ink3); line-height: 1.7; }
+  .note b { color: var(--ink2); }
+  .warn {
+    font-size: 11px; color: #8a5a1f; background: #fdf6e8;
+    border: 1px solid #f0e0c0; padding: 8px 10px; margin-top: 8px; line-height: 1.6;
+  }
+
+  @media (max-width: 900px) {
+    main { flex-direction: column; }
+    aside { width: 100%; height: 46%; border-left: none; border-top: 1px solid var(--line); }
+    #viewport { height: 54%; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>3D 地图库 · <em>4 张</em></h1>
+  <span class="sub">程序化场地 · 与 arena.glb 同尺寸同命名 · 可直接顶替</span>
+  <div class="nav">
+    <a href="/classic.html?map=ring">进单机版</a>
+    <a href="/src/models/preview.html">怪物模型</a>
+  </div>
+</header>
+
+<main>
+  <div id="viewport">
+    <div class="stats" id="stats">
+      <div>TRIS <b id="triCount">—</b></div>
+      <div>DRAW <b id="drawCount">—</b></div>
+      <div>SPAN <b id="spanText">—</b></div>
+      <div>SPAWN <b id="spawnText">—</b></div>
+    </div>
+    <div class="hint">拖拽旋转 · 滚轮缩放 · ← → 换地图</div>
+    <div class="nameplate">
+      <div class="n" id="npName">—</div>
+      <div class="e" id="npEn">—</div>
+    </div>
+  </div>
+
+  <aside>
+    <div class="group">
+      <h2>视角</h2>
+      <div class="btns">
+        <button class="btn on" data-view="game">游戏视角</button>
+        <button class="btn" data-view="wide">全景</button>
+        <button class="btn" data-view="top">俯视</button>
+        <button class="btn" data-view="low">贴地</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>显示</h2>
+      <div class="btns">
+        <button class="btn on" id="btnSpin">自动旋转</button>
+        <button class="btn" id="btnWire">线框</button>
+        <button class="btn" id="btnShadow">阴影</button>
+        <button class="btn" id="btnSpawn">出生点</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>地图</h2>
+      <div class="list" id="list"></div>
+    </div>
+
+    <div class="group">
+      <h2>数据</h2>
+      <div class="meta" id="meta"></div>
+    </div>
+
+    <div class="group">
+      <h2>说明</h2>
+      <div class="note">
+        四张图都是运行时用几何体拼的，不依赖 GLB。<br />
+        坐标原点和 <b>arena.glb</b> 一致：地面 y=0、±30 见方、出生点 ±5.5。
+      </div>
+      <div class="warn" id="playNote">—</div>
+    </div>
+  </aside>
+</main>
+
+<script type="module">
+import * as THREE from '../../vendor/three/lib/three.module.js';
+import { MAP_IDS, buildMap, describeMaps, getLighting } from './index.js';
+
+const viewport = document.getElementById('viewport');
+const MAPS = describeMaps();
+
+/* ================================================================
+ * 渲染器
+ * ================================================================ */
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.18;
+viewport.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, viewport.clientWidth / viewport.clientHeight, 0.5, 400);
+
+/* ================================================================
+ * 光照（按地图预设重建）
+ * ================================================================ */
+
+/* 三盏灯和 scene3d.js 里的完全一致，调色才有意义 */
+const hemi = new THREE.HemisphereLight(0xcbd6ff, 0x2a1c2e, 1.85);
+scene.add(hemi);
+
+const key = new THREE.DirectionalLight(0xffd9b0, 3.5);
+key.position.set(4, 12, 8);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.near = 1;
+key.shadow.camera.far = 220;
+key.shadow.camera.left = -60;
+key.shadow.camera.right = 60;
+key.shadow.camera.top = 60;
+key.shadow.camera.bottom = -60;
+key.shadow.bias = -0.0012;
+scene.add(key);
+
+const rim = new THREE.DirectionalLight(0x7f6bff, 4.4);
+rim.position.set(-9, 7, -8);
+scene.add(rim);
+
+scene.fog = new THREE.Fog(0x141a2e, 40, 140);
+
+/**
+ * 只从主题取「背景 + 雾」，灯光固定复刻游戏里的三盏：
+ * 预览页的意义是预演游戏效果，自己另发明一套灯就等于白调色。
+ */
+function applyLighting(id) {
+  const l = getLighting(id);
+  if (!l) return;
+  scene.background = new THREE.Color(l.background);
+  scene.fog = new THREE.Fog(l.fog.color, l.fog.near, l.fog.far);
+}
+
+/* ================================================================
+ * 地图装载
+ * ================================================================ */
+
+let currentId = MAP_IDS[0];
+let current = null;
+
+/* 出生点标记：两根光柱，默认隐藏 */
+const spawnMarks = new THREE.Group();
+spawnMarks.visible = false;
+scene.add(spawnMarks);
+
+function makeSpawnMark(x, z, color) {
+  const g = new THREE.Group();
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.35, 0.35, 8, 8, 1, true),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }),
+  );
+  beam.position.y = 4;
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(1.9, 0.14, 6, 28),
+    new THREE.MeshBasicMaterial({ color }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.1;
+  g.add(beam, ring);
+  g.position.set(x, 0, z);
+  return g;
+}
+
+function load(id) {
+  if (current) {
+    scene.remove(current);
+    current.traverse((o) => { if (o.isMesh) o.geometry?.dispose?.(); });
+    current = null;
+  }
+
+  const built = buildMap(id);
+  if (!built) return;
+
+  current = built.group;
+  scene.add(current);
+  currentId = id;
+
+  applyLighting(id);
+
+  /* 出生点标记跟着地图走 */
+  spawnMarks.clear();
+  const [a, b] = built.meta.spawns;
+  spawnMarks.add(makeSpawnMark(a.x, a.z, 0x6ec1ff));
+  spawnMarks.add(makeSpawnMark(b.x, b.z, 0xff7a6b));
+
+  const { tris, parts, spawns, note, name, en, playable } = built.meta;
+
+  document.getElementById('triCount').textContent = tris.toLocaleString();
+  document.getElementById('drawCount').textContent = String(parts);
+  document.getElementById('spanText').textContent = `${(built.meta.radius * 2).toFixed(0)} m 直径`;
+  document.getElementById('spawnText').textContent = `${spawns[0].distanceTo(spawns[1]).toFixed(1)} m`;
+  document.getElementById('npName').textContent = name;
+  document.getElementById('npEn').textContent = en;
+
+  document.getElementById('meta').innerHTML = `
+    <div><span>ID</span><span>${id}</span></div>
+    <div><span>主题</span><span>${built.meta.themeName}</span></div>
+    <div><span>三角面</span><span>${tris.toLocaleString()}</span></div>
+    <div><span>网格</span><span>${parts}</span></div>
+    <div><span>地面半径</span><span>${built.meta.radius} m</span></div>
+    <div><span>出生点</span><span>±${Math.abs(spawns[0].z).toFixed(1)} m</span></div>
+    <div><span>玩法</span><span>${playable ? '可直接用' : '待接引擎'}</span></div>
+  `;
+
+  const playNote = document.getElementById('playNote');
+  playNote.textContent = note;
+  playNote.style.borderColor = playable ? '#cfe3d6' : '#f0e0c0';
+  playNote.style.background = playable ? '#eef5f0' : '#fdf6e8';
+  playNote.style.color = playable ? '#2d6a4f' : '#8a5a1f';
+
+  applyWireframe(wireframe);
+  markActive();
+  fitCamera(view);
+}
+
+/* ================================================================
+ * 列表
+ * ================================================================ */
+
+const listEl = document.getElementById('list');
+for (const [i, row] of MAPS.entries()) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'item';
+  btn.dataset.id = row.id;
+  btn.innerHTML = `
+    <span class="dot" style="background:${row.accent}"></span>
+    <span>
+      <span class="nm">${row.name}</span><br />
+      <span class="en">${row.en}</span>
+    </span>
+    <span class="tr">${row.tris}</span>
+    <span class="badge ${row.playable ? 'ok' : ''}">${row.playable ? '可用' : '待接'}</span>
+  `;
+  btn.addEventListener('click', () => load(row.id));
+  listEl.appendChild(btn);
+}
+
+function markActive() {
+  for (const el of listEl.querySelectorAll('.item')) {
+    el.classList.toggle('on', el.dataset.id === currentId);
+  }
+}
+
+/* ================================================================
+ * 相机
+ * ================================================================ */
+
+const orbit = { theta: Math.PI * 0.25, phi: Math.PI * 0.34, radius: 60, spin: true, dragging: false, lx: 0, ly: 0 };
+let view = 'game';
+
+const VIEWS = {
+  // 游戏里的实际机位：dist = r*1.55、height = r*1.05（r 取出生点半径 17.9）
+  game: { phi: Math.PI * 0.36, radius: 29, targetY: 1.6 },
+  wide: { phi: Math.PI * 0.30, radius: 46, targetY: 0 },
+  top: { phi: Math.PI * 0.06, radius: 52, targetY: 0 },
+  low: { phi: Math.PI * 0.46, radius: 34, targetY: 4 },
+};
+
+function fitCamera(v) {
+  const preset = VIEWS[v] ?? VIEWS.game;
+  orbit.phi = preset.phi;
+  orbit.radius = preset.radius;
+  orbit.target = new THREE.Vector3(0, preset.targetY, 0);
+}
+
+function applyCamera() {
+  const r = orbit.radius;
+  const p = orbit.phi;
+  const t = orbit.theta;
+  const target = orbit.target ?? new THREE.Vector3(0, 2.5, 0);
+  camera.position.set(
+    target.x + r * Math.sin(p) * Math.sin(t),
+    target.y + r * Math.cos(p),
+    target.z + r * Math.sin(p) * Math.cos(t),
+  );
+  camera.lookAt(target);
+}
+
+const canvas = renderer.domElement;
+canvas.addEventListener('pointerdown', (e) => {
+  orbit.dragging = true; orbit.lx = e.clientX; orbit.ly = e.clientY;
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!orbit.dragging) return;
+  orbit.theta -= (e.clientX - orbit.lx) * 0.006;
+  orbit.phi = Math.min(Math.PI * 0.49, Math.max(Math.PI * 0.05, orbit.phi - (e.clientY - orbit.ly) * 0.004));
+  orbit.lx = e.clientX; orbit.ly = e.clientY;
+});
+canvas.addEventListener('pointerup', () => { orbit.dragging = false; });
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  orbit.radius = Math.min(180, Math.max(12, orbit.radius * (1 + Math.sign(e.deltaY) * 0.1)));
+}, { passive: false });
+
+for (const btn of document.querySelectorAll('[data-view]')) {
+  btn.addEventListener('click', () => {
+    view = btn.dataset.view;
+    fitCamera(view);
+    orbit.spin = false;
+    document.getElementById('btnSpin').classList.remove('on');
+    for (const b of document.querySelectorAll('[data-view]')) b.classList.toggle('on', b === btn);
+  });
+}
+
+/* ================================================================
+ * 开关
+ * ================================================================ */
+
+let wireframe = false;
+
+function applyWireframe(on) {
+  wireframe = on;
+  if (!current) return;
+  current.traverse((o) => {
+    if (!o.isMesh || !o.material) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if ('wireframe' in m) m.wireframe = on;
+    }
+  });
+}
+
+document.getElementById('btnSpin').addEventListener('click', (e) => {
+  orbit.spin = !orbit.spin;
+  e.currentTarget.classList.toggle('on', orbit.spin);
+});
+document.getElementById('btnWire').addEventListener('click', (e) => {
+  applyWireframe(!wireframe);
+  e.currentTarget.classList.toggle('on', wireframe);
+});
+document.getElementById('btnShadow').addEventListener('click', (e) => {
+  renderer.shadowMap.enabled = !renderer.shadowMap.enabled;
+  e.currentTarget.classList.toggle('on', renderer.shadowMap.enabled);
+  scene.traverse((o) => { if (o.isMesh) o.material.needsUpdate = true; });
+});
+document.getElementById('btnSpawn').addEventListener('click', (e) => {
+  spawnMarks.visible = !spawnMarks.visible;
+  e.currentTarget.classList.toggle('on', spawnMarks.visible);
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  const i = MAP_IDS.indexOf(currentId);
+  if (e.key === 'ArrowRight') { e.preventDefault(); load(MAP_IDS[(i + 1) % MAP_IDS.length]); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); load(MAP_IDS[(i - 1 + MAP_IDS.length) % MAP_IDS.length]); }
+});
+
+/* ================================================================
+ * 主循环
+ * ================================================================ */
+
+const clock = new THREE.Clock();
+
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (orbit.spin && !orbit.dragging) orbit.theta += dt * 0.12;
+  applyCamera();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+function onResize() {
+  const w = viewport.clientWidth;
+  const h = viewport.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', onResize);
+
+/* 启动 */
+document.getElementById('btnShadow').classList.add('on');
+document.getElementById('btnSpawn').classList.add('on');
+spawnMarks.visible = true;
+
+const params = new URLSearchParams(location.search);
+if (MAP_IDS.includes(params.get('map'))) currentId = params.get('map');
+if (params.has('static')) {
+  orbit.spin = false;
+  document.getElementById('btnSpin').classList.remove('on');
+}
+
+load(currentId);
+onResize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
